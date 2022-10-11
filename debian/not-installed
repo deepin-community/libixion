@@ -1,0 +1,6 @@
+usr/bin/ixion-formula-tokenizer
+usr/bin/ixion-parser
+usr/bin/ixion-sorter
+usr/lib/python*/site-packages/ixion.a
+usr/lib/python*/site-packages/ixion.la
+usr/lib/*/libixion-0.16.la

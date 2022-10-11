@@ -1,0 +1,33 @@
+%% Test for inline string support.
+%mode init
+A1="A"
+A2="n"
+A3="d"
+A4="y"
+A5=A1
+A6=LEN("test")
+A7=LEN(123)
+A8=LEN(123.45)
+A9="Andy"
+A10=A9
+A11=LEN(A9)
+A12=CONCATENATE(A1,A2,A3,A4)
+A13=CONCATENATE(A12," is smart")
+%calc
+%mode result
+A1="A"
+A2="n"
+A3="d"
+A4="y"
+A5="A"
+A6=4
+A7=3
+A8=6
+A9="Andy"
+A10="Andy"
+A11=4
+A12="Andy"
+A13="Andy is smart"
+%check
+%exit
+

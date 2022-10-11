@@ -1,0 +1,314 @@
+libixion (0.16.1-4) UNRELEASED; urgency=medium
+
+  * update
+
+ -- Debian LibreOffice Maintainers <debian-openoffice@lists.debian.org>  Thu, 28 Jul 2022 18:21:21 +0800
+
+libixion (0.16.1-4) unstable; urgency=medium
+
+  * add Build-Depends: libmdds-dev (<< 2.0~) to prevent trying with mdds-2.0
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 02 Nov 2021 18:12:58 +0100
+
+libixion (0.16.1-3) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Mattia Rizzolo ]
+  * Enable threads on armel again, since the gcc bug should be long fixed.
+  * Move list of files to clean from d/rules to d/clean.
+  * Declaratively use python3 and sphinxdoc dh sequences from d/control
+    instead of d/rules.
+  * Install the docs from d/*.docs instead of d/*.install, and simplify
+    d/rules in the process.
+  * Use a arch-dependant override for the tests, instead of a manual `if`.
+  * Use the right overrides for the right targets for a more intuitive flow.
+  * Drop Build-Dep on dh-autoreconf, implied by debhelper>=10.
+  * Bump Standards-Version to 4.6.0, set Rules-Requires-Root:no.
+  * Use HTTPS in d/watch.
+  * Bump debhelper compat level to 13.
+
+  [ Debian Janitor ]
+  * Remove constraints unnecessary since buster:
+    + Build-Depends: Drop versioned constraint on dpkg-dev.
+
+ -- Mattia Rizzolo <mattia@debian.org>  Fri, 24 Sep 2021 12:54:13 +0200
+
+libixion (0.16.1-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 18 Oct 2020 10:28:06 +0200
+
+libixion (0.16.1-1) experimental; urgency=medium
+
+  * New upstream version 0.16.1
+
+  * remove libspdlog build-dependency, not needed anymore
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 29 Sep 2020 18:10:36 +0200
+
+libixion (0.16.0-2) experimental; urgency=medium
+
+  * add upstream patches to fix build on 32bit architectures
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 24 Sep 2020 18:06:13 +0200
+
+libixion (0.16.0-1) experimental; urgency=medium
+
+  [ Rene Engelhard ]
+  * Use dh_makeshlibs -VNone to revert to the behaviour pre-dh >=12.
+  * New upstream version 0.16.0
+  * libixion-0.15-0 -> libixion-0.16-0.install
+  * add ${sphinxdoc:Depends} to liborcus-docs depends, thanks lintian
+
+  [ Debian Janitor ]
+  * Trim trailing whitespace.
+  * Bump debhelper from deprecated 9 to 12.
+  * Set debhelper-compat version in Build-Depends.
+  * Set upstream metadata fields: Bug-Database, Bug-Submit, Repository,
+    Repository-Browse.
+  * Drop unnecessary dh arguments: --parallel
+  * Remove Section on libixion-0.16-0 that duplicates source.
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 12 Sep 2020 09:51:18 +0200
+
+libixion (0.15.0-3) unstable; urgency=medium
+
+  * properly depend on libmdds-dev (>= 1.5) in libixion-dev
+
+ -- Rene Engelhard <rene@debian.org>  Wed, 20 Nov 2019 21:30:30 +0100
+
+libixion (0.15.0-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Wed, 20 Nov 2019 12:55:32 +0100
+
+libixion (0.15.0-1) experimental; urgency=medium
+
+  * New upstream version 0.15.0
+
+  * update build dependencies
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 11 Aug 2019 13:08:05 +0200
+
+libixion (0.14.1-4) unstable; urgency=medium
+
+  * Team upload.
+  * Update the unit autopkgtest to detect the soversion at test time, instead
+    of hardcoding it, to avoid testing the just built library instead of the
+    system-installed one.
+
+ -- Mattia Rizzolo <mattia@debian.org>  Tue, 08 Jan 2019 11:21:13 +0100
+
+libixion (0.14.1-3) unstable; urgency=medium
+
+  * Team upload.
+  * Add Vcs-* fields.
+  * wrap-and-sort -ast
+  * Mark python3-ixion as Multi-Arch:same.
+  * Mark libixion-doc as Multi-Arch:foreign.
+  * d/tests/control: Update dependencies after the SONAME bump.  Closes: #918181
+  * Use HTTPS in the d/copyright Format field.
+
+ -- Mattia Rizzolo <mattia@debian.org>  Tue, 08 Jan 2019 10:13:05 +0100
+
+libixion (0.14.1-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 15 Dec 2018 13:56:29 +0000
+
+libixion (0.14.1-1) experimental; urgency=medium
+
+  * New upstream version 0.14.1
+
+  * remove debian/docs
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 18 Sep 2018 19:07:04 +0200
+
+libixion (0.14.0-3) experimental; urgency=medium
+
+  * add upstream patch to fix build on 32bit platforms
+
+ -- Rene Engelhard <rene@debian.org>  Wed, 29 Aug 2018 10:17:14 +0200
+
+libixion (0.14.0-2) experimental; urgency=medium
+
+  * add new Build-Depends: on libboost-filesystem-dev
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 28 Aug 2018 17:31:20 +0200
+
+libixion (0.14.0-1) experimental; urgency=medium
+
+  * New upstream version 0.14.0
+  * rename libixion-0.13-0 to libixion-0.14-0 and
+    bump (build-)depends on mdds to >= 1.4
+
+ -- Rene Engelhard <rene@debian.org>  Mon, 27 Aug 2018 10:36:33 +0200
+
+libixion (0.13.0-1) experimental; urgency=medium
+
+  * New upstream version 0.13.0
+  * add Build-Conflicts: python-sphinx to unconfuse sphinx-build
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 18 Nov 2017 20:05:12 +0000
+
+libixion (0.12.2-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 28 May 2017 19:55:12 +0200
+
+libixion (0.12.2-1) experimental; urgency=medium
+
+  * New upstream version 0.12.2
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 25 Dec 2016 18:24:48 +0100
+
+libixion (0.12.1-1) experimental; urgency=medium
+
+  * [f7e90bc] Imported Upstream version 0.12.1
+  * [23f184d] remove obsolete debian/patches/disable-threads.diff
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 20 Sep 2016 22:45:00 +0200
+
+libixion (0.12.0-4) experimental; urgency=medium
+
+  * [7594c28] add patch from upstream master adding a --disable-threads option
+  * [6376f4b] use --disable-threads on armel to work around gccs #727621
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 17 Sep 2016 15:57:20 +0200
+
+libixion (0.12.0-3) experimental; urgency=medium
+
+  * [2173411] move Maintainer: to Debian LibreOffice Maintainers
+  * [a5d70bb] multiarchify
+
+ -- Rene Engelhard <rene@debian.org>  Wed, 07 Sep 2016 21:06:47 +0200
+
+libixion (0.12.0-2) experimental; urgency=medium
+
+  * [21ed27b] add missing python3-sphinx-bootstrap-theme,python3-breathe to
+              Build-Depends-Indep
+  * [8c3d270] use --with sphinxdoc
+  * [16a28a9] add sphinx-common to Build-Depends for --with sphinxdoc
+  * [ece7cba] use usr/lib/python*/*-packages/ixion.so in python3-ixion.install
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 23 Aug 2016 22:42:20 +0200
+
+libixion (0.12.0-1) experimental; urgency=medium
+
+  * [88a7a13] Imported Upstream version 0.12.0
+  * [fcdaf76] adapt for libixion-0.12.so.0
+  * [93015c5] build libixion-doc
+
+ -- Rene Engelhard <rene@debian.org>  Mon, 25 Jul 2016 14:13:16 +0200
+
+libixion (0.11.1-2) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 14 May 2016 10:44:19 +0200
+
+libixion (0.11.1-1) experimental; urgency=medium
+
+  * Imported Upstream version 0.11.1
+  * bump libmdds-dev build-dep to (>= 1.2)
+
+ -- Rene Engelhard <rene@debian.org>  Fri, 13 May 2016 11:29:22 +0200
+
+libixion (0.11.0-4) unstable; urgency=medium
+
+  * oops, debian/watch actually should check for ixion, not orcus...
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 07 Apr 2016 22:00:22 +0200
+
+libixion (0.11.0-3) unstable; urgency=medium
+
+  * upload to unstable
+
+  * debian/watch: fix filenamemangle
+  * fix python depends: python:Depends -> python3:Depends
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 07 Apr 2016 21:51:28 +0200
+
+libixion (0.11.0-2) experimental; urgency=medium
+
+  * add debian/watch
+  * add Homepage:, update Source:
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 06 Mar 2016 19:55:53 +0100
+
+libixion (0.11.0-1) experimental; urgency=medium
+
+  * New upstream release
+
+ -- Rene Engelhard <rene@debian.org>  Fri, 19 Feb 2016 11:14:19 +0100
+
+libixion (0.11.0~git20151103-1) experimental; urgency=medium
+
+  * new upstream snapshot
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 03 Jan 2016 13:08:39 +0100
+
+libixion (0.9.1-3) unstable; urgency=medium
+
+  * merge parts of https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=798609:
+   - Build using dh-autoreconf.
+   - Enable parallel builds.
+   - Remove cruft in the debian directory.
+  * remove obsolete dependency on libzip-dev (closes: #798730)
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 03 Jan 2016 12:04:45 +0100
+
+libixion (0.9.1-2) unstable; urgency=medium
+
+  * libstdc++6 transition: rename libixion-0.10-0 to
+    libixion-0.10-0v5
+
+ -- Rene Engelhard <rene@debian.org>  Mon, 03 Aug 2015 17:02:53 +0000
+
+libixion (0.9.1-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 09 May 2015 19:06:45 +0200
+
+libixion (0.9.0-3) unstable; urgency=low
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 07 May 2015 07:30:50 +0200
+
+libixion (0.9.0-2) experimental; urgency=low
+
+  * fix short descriptions...
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 05 Apr 2015 18:38:07 +0200
+
+libixion (0.9.0-1) experimental; urgency=low
+
+  * New upstream release
+    - fixes build with gcc-5 (closes: #777948)
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 05 Apr 2015 11:25:58 +0200
+
+libixion (0.7.0-3) unstable; urgency=low
+
+  * upload to unstable
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 31 Jul 2014 20:30:25 +0200
+
+libixion (0.7.0-2) experimental; urgency=low
+
+  * add missing dependency on libmdds-dev (>= 0.9) to libixion-dev
+
+ -- Rene Engelhard <rene@debian.org>  Thu, 10 Apr 2014 19:52:04 +0200
+
+libixion (0.7.0-1) experimental; urgency=low
+
+  * Initial release
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 01 Apr 2014 22:08:23 +0200

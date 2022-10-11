@@ -1,0 +1,23 @@
+%% Test for relational operators with referenced numbers.
+%mode init
+A1:1
+A2:2
+A3:3
+A4=A1<A2
+A5=A1>A2
+A6=A1<>A2
+A7=A1>=A2
+A8=A1<=A2
+A9=(A1+A2)=A3
+A10=A1=A2
+%calc
+%mode result
+A4=1
+A5=0
+A6=1
+A7=0
+A8=1
+A9=1
+A10=0
+%check
+%exit

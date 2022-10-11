@@ -1,0 +1,14 @@
+%% Test built-in functions.
+%mode init
+A1=MAX(10,20,5,36)
+A2=MIN(10,20,5,36)
+A3=AVERAGE(10,20,30,40)
+A4=SUM(1,1,1)+SUM(4,5,6)
+%calc
+%mode result
+A1=36
+A2=5
+A3=25
+A4=18
+%check
+%exit

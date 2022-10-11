@@ -1,0 +1,87 @@
+Source: libixion
+Section: libs
+Priority: optional
+Maintainer: Debian LibreOffice Maintainers <debian-openoffice@lists.debian.org>
+Uploaders:
+ Rene Engelhard <rene@debian.org>,
+Build-Depends:
+ debhelper-compat (= 13),
+Build-Depends-Arch:
+ dh-sequence-python3,
+ libboost-filesystem-dev,
+ libboost-program-options-dev,
+ libboost-system-dev,
+ libboost-thread-dev,
+ libmdds-dev (>= 1.5),
+ libmdds-dev (<< 2.0~),
+ pkg-config,
+ python3,
+ python3-dev,
+ zlib1g-dev,
+Build-Depends-Indep:
+ dh-sequence-sphinxdoc,
+ doxygen,
+ python3-breathe,
+ python3-sphinx,
+ python3-sphinx-rtd-theme,
+Build-Conflicts:
+ python-sphinx,
+Standards-Version: 4.6.0
+Rules-Requires-Root: no
+Homepage: https://gitlab.com/ixion/ixion
+Vcs-Browser: https://salsa.debian.org/libreoffice-team/libixion
+Vcs-Git: https://salsa.debian.org/libreoffice-team/libixion.git
+
+Package: libixion-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends:
+ libixion-0.16-0 (= ${binary:Version}),
+ libmdds-dev (>= 1.5),
+ ${misc:Depends},
+Description: general purpose formula parser & interpreter library -- development
+ Ixion is a general purpose formula parser & interpreter that can calculate
+ multiple named targets, or “cells”.
+ .
+ This package contains headers, pkg-config file and static library for
+ developing applications using Ixion.
+
+Package: libixion-0.16-0
+Architecture: any
+Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Description: general purpose formula parser & interpreter library
+ Ixion is a general purpose formula parser & interpreter that can calculate
+ multiple named targets, or “cells”.
+
+Package: python3-ixion
+Section: python
+Architecture: any
+Multi-Arch: same
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ ${shlibs:Depends},
+Description: general purpose formula parser & interpreter library -- Python module
+ Ixion is a general purpose formula parser & interpreter that can calculate
+ multiple named targets, or “cells”.
+ .
+ This package contains the Python module.
+
+Package: libixion-doc
+Section: doc
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ ${misc:Depends},
+ ${sphinxdoc:Depends},
+Description: general purpose formula parser & interpreter library -- documentation
+ Ixion is a general purpose formula parser & interpreter that can calculate
+ multiple named targets, or “cells”.
+ .
+ This package contains the API documentation.

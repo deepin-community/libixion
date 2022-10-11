@@ -1,0 +1,11 @@
+Test-Command: set -e ; cd "$AUTOPKGTEST_TMP" ; python3 -c "import ixion; print(ixion)"
+Depends:
+ python3,
+ python3-ixion,
+
+Tests: unit
+Depends:
+ libixion-0.16-0,
+ python3-ixion,
+ @builddeps@,
+Restrictions: build-needed, rw-build-tree
