@@ -17,39 +17,25 @@
 
 namespace ixion {
 
-model_context::input_cell::input_cell(nullptr_t) : type(celltype_t::empty) {}
+model_context::input_cell::input_cell(std::nullptr_t) : type(celltype_t::empty) {}
 model_context::input_cell::input_cell(bool b) : type(celltype_t::boolean)
 {
-    value.boolean = b;
+    value = b;
 }
 
 model_context::input_cell::input_cell(const char* s) : type(celltype_t::string)
 {
-    value.string = s;
+    value = std::string_view(s);
 }
 
 model_context::input_cell::input_cell(double v) : type(celltype_t::numeric)
 {
-    value.numeric = v;
+    value = v;
 }
 
 model_context::input_cell::input_cell(const input_cell& other) :
-    type(other.type)
+    type(other.type), value(other.value)
 {
-    switch (type)
-    {
-        case celltype_t::numeric:
-            value.numeric = other.value.numeric;
-            break;
-        case celltype_t::string:
-            value.string = other.value.string;
-            break;
-        case celltype_t::boolean:
-            value.boolean = other.value.boolean;
-            break;
-        default:
-            ;
-    }
 }
 
 model_context::input_row::input_row(std::initializer_list<input_cell> cells) :
@@ -102,11 +88,6 @@ const dirty_cell_tracker& model_context::get_cell_tracker() const
     return mp_impl->get_cell_tracker();
 }
 
-void model_context::erase_cell(const abs_address_t& addr)
-{
-    mp_impl->empty_cell(addr);
-}
-
 void model_context::empty_cell(const abs_address_t& addr)
 {
     mp_impl->empty_cell(addr);
@@ -122,9 +103,9 @@ void model_context::set_boolean_cell(const abs_address_t& addr, bool val)
     mp_impl->set_boolean_cell(addr, val);
 }
 
-void model_context::set_string_cell(const abs_address_t& addr, const char* p, size_t n)
+void model_context::set_string_cell(const abs_address_t& addr, std::string_view s)
 {
-    mp_impl->set_string_cell(addr, p, n);
+    mp_impl->set_string_cell(addr, s);
 }
 
 cell_access model_context::get_cell_access(const abs_address_t& addr) const
@@ -214,7 +195,7 @@ string_id_t model_context::get_string_identifier(const abs_address_t& addr) cons
     return mp_impl->get_string_identifier(addr);
 }
 
-const std::string* model_context::get_string_value(const abs_address_t& addr) const
+std::string_view model_context::get_string_value(const abs_address_t& addr) const
 {
     return mp_impl->get_string_value(addr);
 }
@@ -298,14 +279,14 @@ const iface::table_handler* model_context::get_table_handler() const
     return mp_impl->get_table_handler();
 }
 
-string_id_t model_context::append_string(const char* p, size_t n)
+string_id_t model_context::append_string(std::string_view s)
 {
-    return mp_impl->append_string(p, n);
+    return mp_impl->append_string(s);
 }
 
-string_id_t model_context::add_string(const char* p, size_t n)
+string_id_t model_context::add_string(std::string_view s)
 {
-    return mp_impl->add_string(p, n);
+    return mp_impl->add_string(s);
 }
 
 const std::string* model_context::get_string(string_id_t identifier) const
@@ -313,9 +294,9 @@ const std::string* model_context::get_string(string_id_t identifier) const
     return mp_impl->get_string(identifier);
 }
 
-sheet_t model_context::get_sheet_index(const char* p, size_t n) const
+sheet_t model_context::get_sheet_index(std::string_view name) const
 {
-    return mp_impl->get_sheet_index(p, n);
+    return mp_impl->get_sheet_index(name);
 }
 
 std::string model_context::get_sheet_name(sheet_t sheet) const
@@ -333,38 +314,32 @@ size_t model_context::get_sheet_count() const
     return mp_impl->get_sheet_count();
 }
 
-void model_context::set_named_expression(const char* p, size_t n, formula_tokens_t expr)
+void model_context::set_named_expression(std::string name, formula_tokens_t expr)
 {
     abs_address_t origin(0, 0, 0);
-    mp_impl->set_named_expression(p, n, origin, std::move(expr));
+    mp_impl->set_named_expression(std::move(name), origin, std::move(expr));
 }
 
-void model_context::set_named_expression(const char* p, size_t n, const abs_address_t& origin, formula_tokens_t expr)
+void model_context::set_named_expression(std::string name, const abs_address_t& origin, formula_tokens_t expr)
 {
-    mp_impl->set_named_expression(p, n, origin, std::move(expr));
+    mp_impl->set_named_expression(std::move(name), origin, std::move(expr));
+}
+
+void model_context::set_named_expression(sheet_t sheet, std::string name, formula_tokens_t expr)
+{
+    abs_address_t origin(0, 0, 0);
+    mp_impl->set_named_expression(sheet, std::move(name), origin, std::move(expr));
 }
 
 void model_context::set_named_expression(
-    sheet_t sheet, const char* p, size_t n, formula_tokens_t expr)
+    sheet_t sheet, std::string name, const abs_address_t& origin, formula_tokens_t expr)
 {
-    abs_address_t origin(0, 0, 0);
-    mp_impl->set_named_expression(sheet, p, n, origin, std::move(expr));
+    mp_impl->set_named_expression(sheet, std::move(name), origin, std::move(expr));
 }
 
-void model_context::set_named_expression(
-    sheet_t sheet, const char* p, size_t n, const abs_address_t& origin, formula_tokens_t expr)
-{
-    mp_impl->set_named_expression(sheet, p, n, origin, std::move(expr));
-}
-
-const named_expression_t* model_context::get_named_expression(sheet_t sheet, const std::string& name) const
+const named_expression_t* model_context::get_named_expression(sheet_t sheet, std::string_view name) const
 {
     return mp_impl->get_named_expression(sheet, name);
-}
-
-sheet_t model_context::append_sheet(const char* p, size_t n)
-{
-    return mp_impl->append_sheet(std::string(p, n));
 }
 
 sheet_t model_context::append_sheet(std::string name)
@@ -397,25 +372,15 @@ void model_context::dump_strings() const
     mp_impl->dump_strings();
 }
 
-string_id_t model_context::get_identifier_from_string(const char* p, size_t n) const
+string_id_t model_context::get_identifier_from_string(std::string_view s) const
 {
-    return mp_impl->get_identifier_from_string(p, n);
-}
-
-const column_store_t* model_context::get_column(sheet_t sheet, col_t col) const
-{
-    return mp_impl->get_column(sheet, col);
-}
-
-const column_stores_t* model_context::get_columns(sheet_t sheet) const
-{
-    return mp_impl->get_columns(sheet);
+    return mp_impl->get_identifier_from_string(s);
 }
 
 model_iterator model_context::get_model_iterator(
     sheet_t sheet, rc_direction_t dir, const abs_rc_range_t& range) const
 {
-    return model_iterator(*this, sheet, range, dir);
+    return mp_impl->get_model_iterator(sheet, dir, range);
 }
 
 named_expressions_iterator model_context::get_named_expressions_iterator() const
@@ -426,11 +391,6 @@ named_expressions_iterator model_context::get_named_expressions_iterator() const
 named_expressions_iterator model_context::get_named_expressions_iterator(sheet_t sheet) const
 {
     return named_expressions_iterator(*this, sheet);
-}
-
-abs_address_set_t model_context::get_all_formula_cells() const
-{
-    return mp_impl->get_all_formula_cells();
 }
 
 bool model_context::empty() const

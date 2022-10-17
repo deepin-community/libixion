@@ -29,16 +29,16 @@ class class_factory_store
 
 public:
 
-    const class_factory* get(const std::string& name) const
+    const class_factory* get(std::string_view name) const
     {
-        auto it = m_store.find(name);
+        auto it = m_store.find(std::string(name));
         if (it == m_store.end())
             return nullptr;
 
         return &it->second;
     }
 
-    void insert(void* hdl, const char* name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy)
+    void insert(void* hdl, std::string_view name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy)
     {
         class_factory cf;
         cf.handler = hdl;
@@ -66,9 +66,9 @@ struct compute_engine::impl
     impl() {}
 };
 
-std::shared_ptr<compute_engine> compute_engine::create(const char* name)
+std::shared_ptr<compute_engine> compute_engine::create(std::string_view name)
 {
-    if (!name)
+    if (name.empty())
         // Name is not specified. Use the default engine.
         return std::make_shared<compute_engine>();
 
@@ -81,13 +81,13 @@ std::shared_ptr<compute_engine> compute_engine::create(const char* name)
 }
 
 void compute_engine::add_class(
-    void* hdl, const char* name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy)
+    void* hdl, std::string_view name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy)
 {
     store.insert(hdl, name, func_create, func_destroy);
 }
 
 compute_engine::compute_engine() :
-    mp_impl(ixion::make_unique<impl>())
+    mp_impl(std::make_unique<impl>())
 {
 }
 
@@ -95,9 +95,36 @@ compute_engine::~compute_engine()
 {
 }
 
-const char* compute_engine::get_name() const
+std::string_view compute_engine::get_name() const
 {
     return "default";
+}
+
+void compute_engine::compute_fibonacci(array& io)
+{
+    if (io.type != array_type::uint32)
+        return;
+
+    auto fibonacci = [](uint32_t n) -> uint32_t
+    {
+        if (n <= 1)
+            return n;
+
+        uint32_t curr = 1;
+        uint32_t prev = 1;
+
+        for (uint32_t i = 2; i < n; ++i)
+        {
+            uint32_t temp = curr;
+            curr += prev;
+            prev = temp;
+        }
+
+        return curr;
+    };
+
+    for (uint32_t i = 0; i < io.size; ++i)
+        io.uint32[i] = fibonacci(io.uint32[i]);
 }
 
 }}

@@ -23,6 +23,10 @@ override_dh_auto_build-indep:
 override_dh_auto_test-arch:
 	PYTHONPATH="$(CURDIR)/src/python/.libs" dh_auto_test
 
+override_dh_missing:
+	rm -f debian/tmp/usr/lib/x86_64-linux-gnu/libixion-0.17.la
+	dh_missing
+
 override_dh_makeshlibs:
 	dh_makeshlibs -VNone
 

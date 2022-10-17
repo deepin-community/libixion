@@ -8,10 +8,11 @@
 #ifndef INCLUDED_IXION_TYPES_HPP
 #define INCLUDED_IXION_TYPES_HPP
 
-#include "ixion/env.hpp"
+#include "env.hpp"
 
 #include <cstdlib>
 #include <cstdint>
+#include <string_view>
 
 namespace ixion {
 
@@ -37,11 +38,7 @@ using rc_t = row_t;
  * get_string() method of ixion::iface::formula_model_access to get the
  * actual string value.
  */
-#if SIZEOF_VOID_P == 4
 using string_id_t = uint32_t;
-#else
-using string_id_t = uint64_t;
-#endif
 
 /**
  * Special sheet ID that represents a global scope, as opposed to a
@@ -67,7 +64,7 @@ IXION_DLLPUBLIC bool is_valid_sheet(sheet_t sheet);
 IXION_DLLPUBLIC_VAR const string_id_t empty_string_id;
 
 /**
- * This type represents a raw cell type as stored in {@link model_context}.
+ * This type represents a raw cell type as stored in ixion::model_context.
  */
 enum class celltype_t : uint8_t
 {
@@ -86,9 +83,9 @@ enum class celltype_t : uint8_t
 };
 
 /**
- * Similar to {@link celltype_t}, except that it does not include a formula
- * type. Instead it uses the formula result type to classify its type. The
- * error type refers to an error value in formula cell.
+ * Similar to celltype_t, except that it does not include a formula type.
+ * Instead it uses the formula result type to classify its type. The error
+ * type refers to an error value in formula cell.
  */
 enum class cell_value_t : uint8_t
 {
@@ -129,7 +126,7 @@ enum value_t
     value_empty   = 0x08
 };
 
-/** type that stores a mixture of {@link value_t} values. */
+/** type that stores a mixture of value_t values. */
 class values_t
 {
     int m_val;
@@ -175,9 +172,9 @@ enum class formula_name_resolver_t
 
 /**
  * Formula error types.  Note that only the official (i.e. non-internal)
- * error types have their corresponding error strings.  Use the {@link
- * ixion::get_formula_error_name} function to convert an enum member value
- * of this type to its string representation.
+ * error types have their corresponding error strings.  Use the
+ * get_formula_error_name() function to convert an enum member value of this
+ * type to its string representation.
  */
 enum class formula_error_t : uint8_t
 {
@@ -211,7 +208,7 @@ enum class formula_event_t
 };
 
 /**
- * Specifies iterator direction of a {@link model_context}.
+ * Specifies iterator direction of a ixion::model_context.
  */
 enum class rc_direction_t
 {
@@ -239,8 +236,7 @@ struct IXION_DLLPUBLIC rc_size_t
 
 /**
  * This strcuture stores information about grouped formula cells.  All
- * formula cells belonging to the same group should return the same set of
- * values.
+ * formula cells belonging to the same group shares the same set of values.
  */
 struct IXION_DLLPUBLIC formula_group_t
 {
@@ -266,9 +262,9 @@ struct IXION_DLLPUBLIC formula_group_t
  * Get a string representation of a formula error type.
  *
  * @param fe enum value representing a formula error type.
- * @return string representation of the formula error type.
+ * @return null-terminated string representation of the formula error type.
  */
-IXION_DLLPUBLIC const char* get_formula_error_name(formula_error_t fe);
+IXION_DLLPUBLIC std::string_view get_formula_error_name(formula_error_t fe);
 
 }
 

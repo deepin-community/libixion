@@ -12,6 +12,7 @@
 #include <cassert>
 #include <iostream>
 #include <sstream>
+#include <cctype>
 
 using namespace std;
 
@@ -96,7 +97,7 @@ void tokenizer::run()
 
     while (has_char())
     {
-        if (is_digit(*mp_char))
+        if (std::isdigit(*mp_char))
         {
             numeral();
             continue;
@@ -216,7 +217,7 @@ void tokenizer::numeral()
             return;
         }
 
-        if (is_digit(*mp_char))
+        if (std::isdigit(*mp_char))
             continue;
         if (is_decimal_sep(*mp_char) && ++sep_count <= 1)
             continue;
@@ -232,7 +233,7 @@ void tokenizer::numeral()
         name();
         return;
     }
-    double val = global::to_double(p, len);
+    double val = to_double({p, len});
     m_tokens.push_back(make_unique<lexer_value_token>(val));
 }
 

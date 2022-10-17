@@ -2,11 +2,11 @@
 # Process this file with autoconf to produce a configure script.
 
 m4_define([ixion_major_version], [0])
-m4_define([ixion_minor_version], [16])
-m4_define([ixion_micro_version], [1])
+m4_define([ixion_minor_version], [17])
+m4_define([ixion_micro_version], [0])
 
 m4_define([ixion_major_api_version], [0])
-m4_define([ixion_minor_api_version], [16])
+m4_define([ixion_minor_api_version], [17])
 
 m4_define([ixion_version],
           [ixion_major_version.ixion_minor_version.ixion_micro_version])
@@ -20,7 +20,7 @@ AC_INIT([libixion], [ixion_version])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.11 foreign dist-bzip2 dist-xz])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
-AX_CXX_COMPILE_STDCXX_11
+AX_CXX_COMPILE_STDCXX_17([noext], [mandatory])
 CXXFLAGS="$CXXFLAGS -fvisibility=hidden -Wall -Wshadow -Wno-write-strings -pthread"
 
 AC_CANONICAL_HOST
@@ -57,10 +57,10 @@ AC_ARG_ENABLE([threads],
     [enable_threads=yes]
 )
 
-AC_ARG_ENABLE([cuda],
-    [AS_HELP_STRING([--enable-cuda], [Enable CUDA compute engine])],
-    [enable_cuda="$enableval"],
-    [enable_cuda=no]
+AC_ARG_ENABLE([vulkan],
+    [AS_HELP_STRING([--enable-vulkan], [Enable vulkan compute engine])],
+    [enable_vulkan="$enableval"],
+    [enable_vulkan=no]
 )
 
 IXION_VERSION=ixion_version
@@ -127,7 +127,7 @@ AS_IF([test "x$enable_debug" != "xno"], [
 	AC_DEFINE([NDEBUG], [], [Disable debugging information])
 ])
 
-PKG_CHECK_MODULES([MDDS],[mdds-1.5 >= 1.4.99])
+PKG_CHECK_MODULES([MDDS],[mdds-2.0 >= 1.9.99])
 
 AC_ARG_ENABLE(log-debug,
 	AS_HELP_STRING([--enable-log-debug], [Enable debug outputs.])],
@@ -162,12 +162,16 @@ AS_IF([test "x$enable_threads" != "xno"], [
 ])
 
 AS_IF([test "x$enable_debug_utils" != "xno"], [
-        CXXFLAGS="$CXXFLAGS -D__IXION_DEBUG_UTILS"
+        CXXFLAGS="$CXXFLAGS -DIXION_DEBUG_UTILS"
+])
+
+AS_IF([test "x$enable_vulkan" != "xno"], [
+        PKG_CHECK_MODULES([VULKAN],[vulkan >= 1.2.0])
 ])
 
 AM_CONDITIONAL([BUILD_PYTHON], [test "x$enable_python" != "xno"])
 AM_CONDITIONAL([IXION_THREADS], [test "x$enable_threads" != "xno"])
-AM_CONDITIONAL([BUILD_CUDA], [test "x$enable_cuda" != "xno"])
+AM_CONDITIONAL([BUILD_VULKAN], [test "x$enable_vulkan" != "xno"])
 AM_CONDITIONAL([OSX], [test "x$_os" = "xDarwin"])
 
 BOOST_PROGRAM_OPTIONS
@@ -211,7 +215,7 @@ Build configuration:
         host os:              $host_os
         python:               $enable_python
         threads:              $enable_threads
-        cuda:                 $enable_cuda
+        vulkan:               $enable_vulkan
         log (debug)           $enable_log_debug
         log (trace)           $enable_log_trace
 ==============================================================================

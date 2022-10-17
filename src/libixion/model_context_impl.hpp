@@ -9,13 +9,13 @@
 #define INCLUDED_MODEL_CONTEXT_IMPL_HPP
 
 #include "ixion/model_context.hpp"
-#include "ixion/mem_str_buf.hpp"
 #include "ixion/types.hpp"
 #include "ixion/config.hpp"
-#include "ixion/column_store_type.hpp"
 #include "ixion/dirty_cell_tracker.hpp"
 
+#include "mem_str_buf.hpp"
 #include "workbook.hpp"
+#include "column_store_type.hpp"
 
 #include <vector>
 #include <string>
@@ -27,23 +27,23 @@ namespace ixion { namespace detail {
 class safe_string_pool
 {
     using string_pool_type = std::vector<std::unique_ptr<std::string>>;
-    using string_map_type = std::unordered_map<mem_str_buf, string_id_t, mem_str_buf::hash>;
+    using string_map_type = std::unordered_map<std::string_view, string_id_t>;
 
     std::mutex m_mtx;
     string_pool_type m_strings;
     string_map_type m_string_map;
     std::string m_empty_string;
 
-    string_id_t append_string_unsafe(const char* p, size_t n);
+    string_id_t append_string_unsafe(std::string_view s);
 
 public:
-    string_id_t append_string(const char* p, size_t n);
-    string_id_t add_string(const char* p, size_t n);
+    string_id_t append_string(std::string_view s);
+    string_id_t add_string(std::string_view s);
     const std::string* get_string(string_id_t identifier) const;
 
     size_t size() const;
     void dump_strings() const;
-    string_id_t get_identifier_from_string(const char* p, size_t n) const;
+    string_id_t get_identifier_from_string(std::string_view s) const;
 };
 
 class model_context_impl
@@ -112,7 +112,7 @@ public:
     void empty_cell(const abs_address_t& addr);
     void set_numeric_cell(const abs_address_t& addr, double val);
     void set_boolean_cell(const abs_address_t& addr, bool val);
-    void set_string_cell(const abs_address_t& addr, const char* p, size_t n);
+    void set_string_cell(const abs_address_t& addr, std::string_view s);
     void set_string_cell(const abs_address_t& addr, string_id_t identifier);
     void fill_down_cells(const abs_address_t& src, size_t n_dst);
     formula_cell* set_formula_cell(const abs_address_t& addr, const formula_tokens_store_ptr_t& tokens);
@@ -127,20 +127,20 @@ public:
     double get_numeric_value(const abs_address_t& addr) const;
     bool get_boolean_value(const abs_address_t& addr) const;
     string_id_t get_string_identifier(const abs_address_t& addr) const;
-    const std::string* get_string_value(const abs_address_t& addr) const;
-    string_id_t get_identifier_from_string(const char* p, size_t n) const;
+    std::string_view get_string_value(const abs_address_t& addr) const;
+    string_id_t get_identifier_from_string(std::string_view s) const;
     const formula_cell* get_formula_cell(const abs_address_t& addr) const;
     formula_cell* get_formula_cell(const abs_address_t& addr);
 
     formula_result get_formula_result(const abs_address_t& addr) const;
 
-    void set_named_expression(const char* p, size_t n, const abs_address_t& origin, formula_tokens_t&& expr);
-    void set_named_expression(sheet_t sheet, const char* p, size_t n, const abs_address_t& origin, formula_tokens_t&& expr);
+    void set_named_expression(std::string name, const abs_address_t& origin, formula_tokens_t&& expr);
+    void set_named_expression(sheet_t sheet, std::string name, const abs_address_t& origin, formula_tokens_t&& expr);
 
-    const named_expression_t* get_named_expression(const std::string& name) const;
-    const named_expression_t* get_named_expression(sheet_t sheet, const std::string& name) const;
+    const named_expression_t* get_named_expression(std::string_view name) const;
+    const named_expression_t* get_named_expression(sheet_t sheet, std::string_view name) const;
 
-    sheet_t get_sheet_index(const char* p, size_t n) const;
+    sheet_t get_sheet_index(std::string_view name) const;
     std::string get_sheet_name(sheet_t sheet) const;
     rc_size_t get_sheet_size() const;
     size_t get_sheet_count() const;
@@ -148,8 +148,8 @@ public:
 
     void set_cell_values(sheet_t sheet, std::initializer_list<model_context::input_row>&& rows);
 
-    string_id_t append_string(const char* p, size_t n);
-    string_id_t add_string(const char* p, size_t n);
+    string_id_t append_string(std::string_view s);
+    string_id_t add_string(std::string_view s);
     const std::string* get_string(string_id_t identifier) const;
     size_t get_string_count() const;
     void dump_strings() const;
@@ -159,8 +159,6 @@ public:
 
     double count_range(const abs_range_t& range, const values_t& values_type) const;
 
-    abs_address_set_t get_all_formula_cells() const;
-
     bool empty() const;
 
     const worksheet* fetch_sheet(sheet_t sheet_index) const;
@@ -169,6 +167,9 @@ public:
 
     const detail::named_expressions_t& get_named_expressions() const;
     const detail::named_expressions_t& get_named_expressions(sheet_t sheet) const;
+
+    model_iterator get_model_iterator(
+        sheet_t sheet, rc_direction_t dir, const abs_rc_range_t& range) const;
 
 private:
     model_context& m_parent;

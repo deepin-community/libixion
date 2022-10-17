@@ -7,11 +7,11 @@
 
 #include "ixion/formula_name_resolver.hpp"
 #include "ixion/interface/formula_model_access.hpp"
-#include "ixion/mem_str_buf.hpp"
 #include "ixion/table.hpp"
 
 #include "formula_functions.hpp"
 #include "debug.hpp"
+#include "mem_str_buf.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -19,6 +19,7 @@
 #include <vector>
 #include <limits>
 #include <algorithm>
+#include <cctype>
 
 using namespace std;
 
@@ -51,12 +52,12 @@ bool check_address_by_sheet_bounds(const iface::formula_model_access* cxt, const
 
 bool resolve_function(const char* p, size_t n, formula_name_t& ret)
 {
-    formula_function_t func_oc = formula_functions::get_function_opcode(p, n);
+    formula_function_t func_oc = formula_functions::get_function_opcode({p, n});
     if (func_oc != formula_function_t::func_unknown)
     {
         // This is a built-in function.
         ret.type = formula_name_t::function;
-        ret.func_oc = func_oc;
+        ret.value = func_oc;
         return true;
     }
     return false;
@@ -89,8 +90,8 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
     short scope = 0;
     size_t last_column_pos = std::numeric_limits<size_t>::max();
     mem_str_buf buf;
-    mem_str_buf table_name;
-    vector<mem_str_buf> names;
+    std::string_view table_name;
+    std::vector<std::string_view> names;
 
     bool table_detected = false;
 
@@ -110,7 +111,7 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
                     if (scope != 0)
                         return false;
 
-                    table_name = buf;
+                    table_name = { buf.get(), buf.size() };
                     buf.clear();
                 }
 
@@ -125,7 +126,7 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
 
                 if (!buf.empty())
                 {
-                    names.push_back(buf);
+                    names.emplace_back(buf.get(), buf.size());
                     buf.clear();
                 }
 
@@ -170,56 +171,53 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
     if (names.empty())
         return false;
 
-    ret.table.areas = table_area_none;
-    ret.type = formula_name_t::table_reference;
-    ret.table.name = table_name.get();
-    ret.table.name_length = table_name.size();
-    ret.table.column_first = NULL;
-    ret.table.column_first_length = 0;
-    ret.table.column_last = NULL;
-    ret.table.column_last_length = 0;
+    formula_name_t::table_type table;
+    table.areas = table_area_none;
+    table.name = table_name;
+    table.column_first = std::string_view();
+    table.column_last = std::string_view();
 
-    vector<mem_str_buf>::iterator it = names.begin(), it_end = names.end();
-    for (; it != it_end; ++it)
+    for (std::size_t i = 0; i < names.size(); ++i)
     {
-        buf = *it;
-        assert(!buf.empty());
-        if (buf[0] == '#')
+        std::string_view name = names[i];
+        assert(!name.empty());
+
+        if (name[0] == '#')
         {
             // area specifier.
-            buf.pop_front();
-            if (buf.equals("Headers"))
-                ret.table.areas |= table_area_headers;
-            else if (buf.equals("Data"))
-                ret.table.areas |= table_area_data;
-            else if (buf.equals("Totals"))
-                ret.table.areas |= table_area_totals;
-            else if (buf.equals("All"))
-                ret.table.areas = table_area_all;
+            name.remove_prefix(1);
+            if (name == "Headers")
+                table.areas |= table_area_headers;
+            else if (name == "Data")
+                table.areas |= table_area_data;
+            else if (name == "Totals")
+                table.areas |= table_area_totals;
+            else if (name == "All")
+                table.areas = table_area_all;
         }
-        else if (ret.table.column_first_length)
+        else if (!table.column_first.empty())
         {
             // This is a second column name.
-            if (ret.table.column_last_length)
+            if (!table.column_last.empty())
                 return false;
 
-            size_t dist = std::distance(names.begin(), it);
-            if (dist != last_column_pos)
+            if (i != last_column_pos)
                 return false;
 
-            ret.table.column_last = buf.get();
-            ret.table.column_last_length = buf.size();
+            table.column_last = name;
         }
         else
         {
             // first column name.
-            if (!ret.table.areas)
-                ret.table.areas = table_area_data;
+            if (!table.areas)
+                table.areas = table_area_data;
 
-            ret.table.column_first = buf.get();
-            ret.table.column_first_length = buf.size();
+            table.column_first = name;
         }
     }
+
+    ret.type = formula_name_t::table_reference;
+    ret.value = table;
 
     return true;
 }
@@ -240,20 +238,10 @@ void resolve_function_or_name(const char* p, size_t n, formula_name_t& ret)
     ret.type = formula_name_t::named_expression;
 }
 
-void set_address(formula_name_t::address_type& dest, const address_t& addr)
-{
-    dest.sheet = addr.sheet;
-    dest.row = addr.row;
-    dest.col = addr.column;
-    dest.abs_sheet = addr.abs_sheet;
-    dest.abs_row = addr.abs_row;
-    dest.abs_col = addr.abs_column;
-}
-
 void set_cell_reference(formula_name_t& ret, const address_t& addr)
 {
     ret.type = formula_name_t::cell_reference;
-    set_address(ret.address, addr);
+    ret.value = addr;
 }
 
 enum class resolver_parse_mode { column, row };
@@ -584,11 +572,11 @@ bool parse_sheet_name_quoted(
 
             if (buffer.empty())
                 // Name contains no single quotes.
-                sheet = cxt.get_sheet_index(p1, len);
+                sheet = cxt.get_sheet_index({p1, len});
             else
             {
                 buffer += string(p1, len);
-                sheet = cxt.get_sheet_index(buffer.data(), buffer.size());
+                sheet = cxt.get_sheet_index({buffer.data(), buffer.size()});
             }
 
             ++p; // skip the closing quote.
@@ -639,7 +627,7 @@ bool parse_sheet_name(
     {
         if (*p == sep)
         {
-            sheet = cxt.get_sheet_index(p0, len);
+            sheet = cxt.get_sheet_index({p0, len});
             if (p != p_last)
                 ++p; // skip the separator.
             return true;
@@ -676,7 +664,7 @@ T parse_number(const char*&p, const char* p_last)
     }
 
     bool all_digits = false;
-    while (is_digit(*p))
+    while (std::isdigit(*p))
     {
         // Parse number.
         num *= 10;
@@ -739,7 +727,7 @@ parse_address_result_type parse_address_a1(const char*& p, const char* p_last, a
             if (addr.column > column_upper_bound)
                 return invalid;
         }
-        else if (is_digit(c))
+        else if (std::isdigit(c))
         {
             if (mode == resolver_parse_mode::column)
             {
@@ -864,7 +852,7 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
             {
                 // Relative row address.
                 ++p;
-                if (!is_digit(*p) && *p != '-' && *p != '+')
+                if (!std::isdigit(*p) && *p != '-' && *p != '+')
                     return parse_address_result_type::invalid;
 
                 addr.row = parse_number<row_t>(p, p_last);
@@ -873,7 +861,7 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
                     return (*p == ']') ? parse_address_result_type::valid_address : parse_address_result_type::invalid;
                 ++p;
             }
-            else if (is_digit(*p))
+            else if (std::isdigit(*p))
             {
                 // Absolute row address.
                 addr.row = parse_number<row_t>(p, p_last);
@@ -883,7 +871,7 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
 
                 --addr.row; // 1-based to 0-based.
 
-                if (p == p_last && is_digit(*p))
+                if (p == p_last && std::isdigit(*p))
                     // 'R' followed by a number without 'C' is valid.
                     return parse_address_result_type::valid_address;
                 ++p;
@@ -914,7 +902,7 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
         {
             // Relative column address.
             ++p;
-            if (!is_digit(*p) && *p != '-' && *p != '+')
+            if (!std::isdigit(*p) && *p != '-' && *p != '+')
                 return parse_address_result_type::invalid;
 
             addr.column = parse_number<col_t>(p, p_last);
@@ -924,7 +912,7 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
 
             ++p;
         }
-        else if (is_digit(*p))
+        else if (std::isdigit(*p))
         {
             // Absolute column address.
             addr.abs_column = true;
@@ -1059,21 +1047,6 @@ parse_address_result parse_address_odff(
     return res;
 }
 
-string abs_or_rel(bool _abs)
-{
-    return _abs ? "(abs)" : "(rel)";
-}
-
-string _to_string(const formula_name_t::address_type& addr)
-{
-    std::ostringstream os;
-    os << "[sheet=" << addr.sheet << abs_or_rel(addr.abs_sheet) << ",row="
-        << addr.row << abs_or_rel(addr.abs_row) << ",column="
-        << addr.col << abs_or_rel(addr.abs_col) << "]";
-
-    return os.str();
-}
-
 void to_relative_address(address_t& addr, const abs_address_t& pos, bool sheet)
 {
     if (!addr.abs_sheet && sheet)
@@ -1161,7 +1134,8 @@ string to_string(const iface::formula_model_access* cxt, const table_t& table)
 
 } // anonymous namespace
 
-formula_name_t::formula_name_t() : type(invalid) {}
+formula_name_t::formula_name_t() :
+    type(invalid), value(formula_function_t::func_unknown) {}
 
 string formula_name_t::to_string() const
 {
@@ -1170,11 +1144,14 @@ string formula_name_t::to_string() const
     switch (type)
     {
         case cell_reference:
-            os << "cell reference: " << _to_string(address);
+            os << "cell reference: " << std::get<address_t>(value);
             break;
         case function:
-            os << "function";
+        {
+            auto v = std::get<formula_function_t>(value);
+            os << "function: " << get_formula_function_name(v);
             break;
+        }
         case invalid:
             os << "invalid";
             break;
@@ -1182,8 +1159,7 @@ string formula_name_t::to_string() const
             os << "named expression";
             break;
         case range_reference:
-            os << "range raference: first: " << _to_string(range.first) << "  last: "
-                << _to_string(range.last) << endl;
+            os << "range raference: " << std::get<range_t>(value);
             break;
         case table_reference:
             os << "table reference";
@@ -1193,29 +1169,6 @@ string formula_name_t::to_string() const
     }
 
     return os.str();
-}
-
-address_t to_address(const formula_name_t::address_type& src)
-{
-    address_t addr;
-
-    addr.sheet      = src.sheet;
-    addr.abs_sheet  = src.abs_sheet;
-    addr.row        = src.row;
-    addr.abs_row    = src.abs_row;
-    addr.column     = src.col;
-    addr.abs_column = src.abs_col;
-
-    return addr;
-}
-
-range_t to_range(const formula_name_t::range_type& src)
-{
-    range_t range;
-    range.first = to_address(src.first);
-    range.last = to_address(src.last);
-
-    return range;
 }
 
 formula_name_resolver::formula_name_resolver() {}
@@ -1236,8 +1189,11 @@ public:
     excel_a1(const iface::formula_model_access* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
     virtual ~excel_a1() {}
 
-    virtual formula_name_t resolve(const char* p, size_t n, const abs_address_t& pos) const
+    virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
     {
+        const char* p = s.data();
+        std::size_t n = s.size();
+
         formula_name_t ret;
         if (!n)
             return ret;
@@ -1286,19 +1242,24 @@ public:
 
             ++p; // skip ':'
 
+            range_t v;
             to_relative_address(parsed_addr, pos, true);
-            set_address(ret.range.first, parsed_addr);
+            v.first = parsed_addr;
 
             // For now, we assume the sheet index of the end address is identical
             // to that of the begin address.
             parse_res = parse_address_excel_a1(NULL, p, p_last, parsed_addr);
             if (parse_res != valid_address)
+            {
                 // The 2nd part after the ':' is not valid.
+                ret.value = v;
                 return ret;
+            }
 
             to_relative_address(parsed_addr, pos, true);
-            set_address(ret.range.last, parsed_addr);
-            ret.range.last.sheet = ret.range.first.sheet; // re-use the sheet index of the begin address.
+            v.last = parsed_addr;
+            v.last.sheet = v.first.sheet; // re-use the sheet index of the begin address.
+            ret.value = v;
             ret.type = formula_name_t::range_reference;
             return ret;
         }
@@ -1387,8 +1348,11 @@ class excel_r1c1 : public formula_name_resolver
 public:
     excel_r1c1(const iface::formula_model_access* cxt) : mp_cxt(cxt) {}
 
-    virtual formula_name_t resolve(const char* p, size_t n, const abs_address_t& pos) const
+    virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
     {
+        const char* p = s.data();
+        std::size_t n = s.size();
+
         formula_name_t ret;
         if (!n)
             return ret;
@@ -1439,9 +1403,13 @@ public:
                 // to that of the begin address.
                 parsed_addr2.sheet = parsed_addr.sheet;
 
-                set_address(ret.range.first, parsed_addr);
-                set_address(ret.range.last, parsed_addr2);
                 ret.type = formula_name_t::range_reference;
+
+                range_t v;
+                v.first = parsed_addr;
+                v.last = parsed_addr2;
+                ret.value = v;
+
                 return ret;
             }
             default:
@@ -1532,8 +1500,11 @@ public:
         m_func_append_address(func_append_address),
         m_func_append_sheet_name(func_append_sheet_name) {}
 
-    virtual formula_name_t resolve(const char *p, size_t n, const abs_address_t &pos) const override
+    virtual formula_name_t resolve(std::string_view s, const abs_address_t &pos) const override
     {
+        const char* p = s.data();
+        std::size_t n = s.size();
+
         formula_name_t ret;
         if (!n)
             return ret;
@@ -1587,7 +1558,8 @@ public:
             ++p; // skip ':'
 
             to_relative_address(parsed_addr, pos, true);
-            set_address(ret.range.first, parsed_addr);
+            range_t v;
+            v.first = parsed_addr;
 
             parse_res = m_func_parse_address(mp_cxt, p, p_last, parsed_addr);
             IXION_TRACE("parse address result on 2nd address (" << to_string(parse_res.result) << ")");
@@ -1599,8 +1571,9 @@ public:
             }
 
             to_relative_address(parsed_addr, pos, parse_res.sheet_name);
-            set_address(ret.range.last, parsed_addr);
+            v.last = parsed_addr;
             ret.type = formula_name_t::range_reference;
+            ret.value = v;
             return ret;
         }
 
@@ -1665,8 +1638,11 @@ public:
     odff_resolver(const iface::formula_model_access* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
     virtual ~odff_resolver() {}
 
-    virtual formula_name_t resolve(const char* p, size_t n, const abs_address_t& pos) const
+    virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
     {
+        const char* p = s.data();
+        std::size_t n = s.size();
+
         formula_name_t ret;
 
         if (resolve_function(p, n, ret))
@@ -1715,8 +1691,9 @@ public:
 
             ++p; // skip ':'
 
+            range_t v;
             to_relative_address(parsed_addr, pos, true);
-            set_address(ret.range.first, parsed_addr);
+            v.first = parsed_addr;
 
             parse_res = parse_address_odff(mp_cxt, p, p_last, parsed_addr);
             if (parse_res.result != valid_address)
@@ -1725,8 +1702,10 @@ public:
 
             to_relative_address(parsed_addr, pos, parse_res.sheet_name);
 
-            set_address(ret.range.last, parsed_addr);
+            v.last = parsed_addr;
             ret.type = formula_name_t::range_reference;
+            ret.value = v;
+
             return ret;
         }
 

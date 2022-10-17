@@ -8,13 +8,12 @@
 #ifndef INCLUDED_IXION_MODEL_CONTEXT_HPP
 #define INCLUDED_IXION_MODEL_CONTEXT_HPP
 
-#include "ixion/column_store_type.hpp"
-#include "ixion/mem_str_buf.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/env.hpp"
+#include "env.hpp"
+#include "./interface/formula_model_access.hpp"
 
 #include <string>
 #include <memory>
+#include <variant>
 
 namespace ixion {
 
@@ -62,15 +61,10 @@ public:
      */
     struct IXION_DLLPUBLIC input_cell
     {
+        using value_type = std::variant<bool, double, std::string_view>;
+
         celltype_t type;
-
-        union
-        {
-            bool boolean;
-            double numeric;
-            const char* string;
-
-        } value;
+        value_type value;
 
         /** Initializes the cell to be empty. */
         input_cell(std::nullptr_t);
@@ -108,13 +102,13 @@ public:
     virtual double get_numeric_value(const abs_address_t& addr) const override;
     virtual bool get_boolean_value(const abs_address_t& addr) const override;
     virtual string_id_t get_string_identifier(const abs_address_t& addr) const override;
-    virtual const std::string* get_string_value(const abs_address_t& addr) const override;
+    virtual std::string_view get_string_value(const abs_address_t& addr) const override;
     virtual const formula_cell* get_formula_cell(const abs_address_t& addr) const override;
     virtual formula_cell* get_formula_cell(const abs_address_t& addr) override;
 
     virtual formula_result get_formula_result(const abs_address_t& addr) const override;
 
-    virtual const named_expression_t* get_named_expression(sheet_t sheet, const std::string& name) const override;
+    virtual const named_expression_t* get_named_expression(sheet_t sheet, std::string_view name) const override;
 
     virtual double count_range(const abs_range_t& range, const values_t& values_type) const override;
     virtual matrix get_range_value(const abs_range_t& range) const override;
@@ -122,23 +116,23 @@ public:
     virtual iface::table_handler* get_table_handler() override;
     virtual const iface::table_handler* get_table_handler() const override;
 
-    virtual string_id_t append_string(const char* p, size_t n) override;
-    virtual string_id_t add_string(const char* p, size_t n) override;
+    virtual string_id_t add_string(std::string_view s) override;
     virtual const std::string* get_string(string_id_t identifier) const override;
-    virtual sheet_t get_sheet_index(const char* p, size_t n) const override;
+    virtual sheet_t get_sheet_index(std::string_view name) const override;
     virtual std::string get_sheet_name(sheet_t sheet) const override;
     virtual rc_size_t get_sheet_size() const override;
     virtual size_t get_sheet_count() const override;
 
+    string_id_t append_string(std::string_view s);
+
     void set_sheet_size(const rc_size_t& sheet_size);
     void set_config(const config& cfg);
 
-    IXION_DEPRECATED void erase_cell(const abs_address_t& addr);
     void empty_cell(const abs_address_t& addr);
 
     void set_numeric_cell(const abs_address_t& addr, double val);
     void set_boolean_cell(const abs_address_t& adr, bool val);
-    void set_string_cell(const abs_address_t& addr, const char* p, size_t n);
+    void set_string_cell(const abs_address_t& addr, std::string_view s);
     void set_string_cell(const abs_address_t& addr, string_id_t identifier);
 
     cell_access get_cell_access(const abs_address_t& addr) const;
@@ -198,26 +192,22 @@ public:
      * Set a named expression associated with a string name in the global
      * scope.
      *
-     * @param p pointer to the string buffer that contains the name of the
-     *          expression.
-     * @param n length of the buffer containing the name.
+     * @param name name of the expression.
      * @param expr formula tokens to use for the named expression.
      */
-    void set_named_expression(const char* p, size_t n, formula_tokens_t expr);
+    void set_named_expression(std::string name, formula_tokens_t expr);
 
     /**
      * Set a named expression associated with a string name in the global
      * scope.
      *
-     * @param p pointer to the string buffer that contains the name of the
-     *          expression.
-     * @param n length of the buffer containing the name.
+     * @param name name of the expression.
      * @param origin position of the origin cell.  Origin cell is relevant
      *               only when you need to convert the tokens into a string
      *               representation.
      * @param expr formula tokens to use for the named expression.
      */
-    void set_named_expression(const char* p, size_t n, const abs_address_t& origin, formula_tokens_t expr);
+    void set_named_expression(std::string name, const abs_address_t& origin, formula_tokens_t expr);
 
     /**
      * Set a named expression associated with a string name in a sheet-local
@@ -225,12 +215,10 @@ public:
      *
      * @param sheet 0-based index of the sheet to register this expression
      *              with.
-     * @param p pointer to the string buffer that contains the name of the
-     *          expression.
-     * @param n length of the buffer containing the name.
+     * @param name name of the expression.
      * @param expr formula tokens to use for the named expression.
      */
-    void set_named_expression(sheet_t sheet, const char* p, size_t n, formula_tokens_t expr);
+    void set_named_expression(sheet_t sheet, std::string name, formula_tokens_t expr);
 
     /**
      * Set a named expression associated with a string name in a sheet-local
@@ -238,39 +226,25 @@ public:
      *
      * @param sheet 0-based index of the sheet to register this expression
      *              with.
-     * @param p pointer to the string buffer that contains the name of the
-     *          expression.
-     * @param n length of the buffer containing the name.
+     * @param name name of the expression.
      * @param origin position of the origin cell.  Origin cell is relevant
      *               only when you need to convert the tokens into a string
      *               representation.
      * @param expr formula tokens to use for the named expression.
      */
-    void set_named_expression(sheet_t sheet, const char* p, size_t n, const abs_address_t& origin, formula_tokens_t expr);
+    void set_named_expression(sheet_t sheet, std::string name, const abs_address_t& origin, formula_tokens_t expr);
 
     /**
      * Append a new sheet to the model.  The caller must ensure that the name
      * of the new sheet is unique within the model context.  When the name
-     * being used for the new sheet already exists, it throws a {@link
-     * model_context_error} exception.
-     *
-     * @param p pointer to the char array storing the name of the inserted
-     *          sheet.
-     * @param n size of the sheet name char array.
-     *
-     * @return sheet index of the inserted sheet.
-     */
-    sheet_t append_sheet(const char* p, size_t n);
-
-    /**
-     * Append a new sheet to the model.  The caller must ensure that the name
-     * of the new sheet is unique within the model context.  When the name
-     * being used for the new sheet already exists, it throws a {@link
-     * model_context_error} exception.
+     * being used for the new sheet already exists, it throws a
+     * model_context_error exception.
      *
      * @param name name of the sheet to be inserted.
      *
      * @return sheet index of the inserted sheet.
+     *
+     * @throw model_context_error
      */
     sheet_t append_sheet(std::string name);
 
@@ -293,29 +267,17 @@ public:
 
     void dump_strings() const;
 
-    string_id_t get_identifier_from_string(const char* p, size_t n) const;
-
     /**
-     * Get column storage.
+     * Get an integer string ID from a string value.  If the string value
+     * doesn't exist in the pool, the value equal to empty_string_id gets
+     * returned.
      *
-     * @param sheet sheet index.
-     * @param col column index.
+     * @param s string value.
      *
-     * @return const pointer to column storage, or NULL in case sheet index or
-     *         column index is out of bound.
+     * @return string_id_t integer string ID associated with the string value
+     *         given.
      */
-    const column_store_t* get_column(sheet_t sheet, col_t col) const;
-
-    /**
-     * Get an array of column stores for the entire sheet.
-     *
-     *
-     * @param sheet sheet index.
-     *
-     * @return const pointer to an array of column stores, or nullptr in case
-     * the sheet index is out of bound.
-     */
-    const column_stores_t* get_columns(sheet_t sheet) const;
+    string_id_t get_identifier_from_string(std::string_view s) const;
 
     /**
      * Get an immutable iterator that lets you iterate cell values in one
@@ -344,13 +306,6 @@ public:
      *              stored.
      */
     named_expressions_iterator get_named_expressions_iterator(sheet_t sheet) const;
-
-    /**
-     * @deprecated This is not generic enough and should be replaced.  This
-     *             functionality should be realized via model_iterator in the
-     *             future.
-     */
-    abs_address_set_t get_all_formula_cells() const;
 
     bool empty() const;
 };

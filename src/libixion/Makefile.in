@@ -88,7 +88,7 @@ PRE_UNINSTALL = :
 POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
-@BUILD_CUDA_TRUE@am__append_1 = -DBUILD_CUDA
+@BUILD_VULKAN_TRUE@am__append_1 = -DBUILD_VULKAN
 check_PROGRAMS = document-test$(EXEEXT) ixion-test$(EXEEXT) \
 	ixion-test-track-deps$(EXEEXT) compute-engine-test$(EXEEXT) \
 	dirty-cell-tracker-test$(EXEEXT)
@@ -101,7 +101,8 @@ TESTS = document-test$(EXEEXT) ixion-test$(EXEEXT) \
 	dirty-cell-tracker-test$(EXEEXT)
 subdir = src/libixion
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/m4/ax_cxx_compile_stdcxx_11.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/m4/ax_cxx_compile_stdcxx.m4 \
+	$(top_srcdir)/m4/ax_cxx_compile_stdcxx_17.m4 \
 	$(top_srcdir)/m4/boost.m4 $(top_srcdir)/m4/libtool.m4 \
 	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
 	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
@@ -142,45 +143,48 @@ am__uninstall_files_from_dir = { \
   }
 am__installdirs = "$(DESTDIR)$(libdir)" "$(DESTDIR)$(pkglibdir)"
 LTLIBRARIES = $(lib_LTLIBRARIES) $(pkglib_LTLIBRARIES)
-@BUILD_CUDA_TRUE@ixion_@IXION_API_VERSION@_cuda_la_DEPENDENCIES =  \
-@BUILD_CUDA_TRUE@	libixion-@IXION_API_VERSION@.la
-am__ixion_@IXION_API_VERSION@_cuda_la_SOURCES_DIST =  \
-	compute_engine_cuda.hpp compute_engine_cuda.cpp
-@BUILD_CUDA_TRUE@am_ixion_@IXION_API_VERSION@_cuda_la_OBJECTS =  \
-@BUILD_CUDA_TRUE@	compute_engine_cuda.lo
-ixion_@IXION_API_VERSION@_cuda_la_OBJECTS =  \
-	$(am_ixion_@IXION_API_VERSION@_cuda_la_OBJECTS)
+am__DEPENDENCIES_1 =
+@BUILD_VULKAN_TRUE@ixion_@IXION_API_VERSION@_vulkan_la_DEPENDENCIES =  \
+@BUILD_VULKAN_TRUE@	libixion-@IXION_API_VERSION@.la \
+@BUILD_VULKAN_TRUE@	$(am__DEPENDENCIES_1)
+am__ixion_@IXION_API_VERSION@_vulkan_la_SOURCES_DIST =  \
+	compute_engine_vulkan.hpp compute_engine_vulkan.cpp \
+	vulkan_obj.hpp vulkan_obj.cpp
+@BUILD_VULKAN_TRUE@am_ixion_@IXION_API_VERSION@_vulkan_la_OBJECTS = ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo \
+@BUILD_VULKAN_TRUE@	ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo
+ixion_@IXION_API_VERSION@_vulkan_la_OBJECTS =  \
+	$(am_ixion_@IXION_API_VERSION@_vulkan_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
-ixion_@IXION_API_VERSION@_cuda_la_LINK = $(LIBTOOL) $(AM_V_lt) \
+ixion_@IXION_API_VERSION@_vulkan_la_LINK = $(LIBTOOL) $(AM_V_lt) \
 	--tag=CXX $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link \
 	$(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) \
-	$(ixion_@IXION_API_VERSION@_cuda_la_LDFLAGS) $(LDFLAGS) -o $@
-@BUILD_CUDA_TRUE@am_ixion_@IXION_API_VERSION@_cuda_la_rpath = -rpath \
-@BUILD_CUDA_TRUE@	$(pkglibdir)
-am__DEPENDENCIES_1 =
+	$(ixion_@IXION_API_VERSION@_vulkan_la_LDFLAGS) $(LDFLAGS) -o \
+	$@
+@BUILD_VULKAN_TRUE@am_ixion_@IXION_API_VERSION@_vulkan_la_rpath =  \
+@BUILD_VULKAN_TRUE@	-rpath $(pkglibdir)
 libixion_@IXION_API_VERSION@_la_DEPENDENCIES = $(am__DEPENDENCIES_1)
 am__libixion_@IXION_API_VERSION@_la_SOURCES_DIST = address.cpp \
 	address_iterator.cpp calc_status.hpp calc_status.cpp cell.cpp \
-	cell_access.cpp compute_engine.cpp concrete_formula_tokens.hpp \
-	concrete_formula_tokens.cpp config.cpp debug.hpp debug.cpp \
-	dirty_cell_tracker.cpp document.cpp exceptions.cpp formula.cpp \
-	formula_calc.cpp formula_function_opcode.cpp \
-	formula_functions.hpp formula_functions.cpp \
-	formula_interpreter.hpp formula_interpreter.cpp \
-	formula_lexer.hpp formula_lexer.cpp formula_name_resolver.cpp \
-	formula_parser.hpp formula_parser.cpp formula_result.cpp \
-	formula_tokens.cpp formula_value_stack.hpp \
-	formula_value_stack.cpp global.cpp info.cpp lexer_tokens.hpp \
-	lexer_tokens.cpp matrix.cpp mem_str_buf.cpp model_context.cpp \
-	model_context_impl.hpp model_context_impl.cpp \
-	model_iterator.cpp model_types.hpp model_types.cpp module.cpp \
-	named_expressions_iterator.cpp queue_entry.hpp queue_entry.cpp \
-	table.cpp types.cpp utils.hpp utils.cpp workbook.hpp \
-	workbook.cpp interface.cpp cell_queue_manager.hpp \
-	cell_queue_manager.cpp
+	cell_access.cpp column_store_type.hpp compute_engine.cpp \
+	concrete_formula_tokens.hpp concrete_formula_tokens.cpp \
+	config.cpp debug.hpp debug.cpp dirty_cell_tracker.cpp \
+	document.cpp exceptions.cpp formula.cpp formula_calc.cpp \
+	formula_function_opcode.cpp formula_functions.hpp \
+	formula_functions.cpp formula_interpreter.hpp \
+	formula_interpreter.cpp formula_lexer.hpp formula_lexer.cpp \
+	formula_name_resolver.cpp formula_parser.hpp \
+	formula_parser.cpp formula_result.cpp formula_tokens.cpp \
+	formula_value_stack.hpp formula_value_stack.cpp global.cpp \
+	info.cpp lexer_tokens.hpp lexer_tokens.cpp matrix.cpp \
+	mem_str_buf.cpp model_context.cpp model_context_impl.hpp \
+	model_context_impl.cpp model_iterator.cpp model_types.hpp \
+	model_types.cpp module.cpp named_expressions_iterator.cpp \
+	queue_entry.hpp queue_entry.cpp table.cpp types.cpp utils.hpp \
+	utils.cpp workbook.hpp workbook.cpp interface.cpp \
+	cell_queue_manager.hpp cell_queue_manager.cpp
 @IXION_THREADS_TRUE@am__objects_1 = cell_queue_manager.lo
 am_libixion_@IXION_API_VERSION@_la_OBJECTS = address.lo \
 	address_iterator.lo calc_status.lo cell.lo cell_access.lo \
@@ -241,7 +245,6 @@ am__depfiles_remade = ./$(DEPDIR)/address.Plo \
 	./$(DEPDIR)/cell.Plo ./$(DEPDIR)/cell_access.Plo \
 	./$(DEPDIR)/cell_queue_manager.Plo \
 	./$(DEPDIR)/compute_engine.Plo \
-	./$(DEPDIR)/compute_engine_cuda.Plo \
 	./$(DEPDIR)/compute_engine_test.Po \
 	./$(DEPDIR)/concrete_formula_tokens.Plo ./$(DEPDIR)/config.Plo \
 	./$(DEPDIR)/debug.Plo ./$(DEPDIR)/dirty_cell_tracker.Plo \
@@ -258,6 +261,8 @@ am__depfiles_remade = ./$(DEPDIR)/address.Plo \
 	./$(DEPDIR)/formula_tokens.Plo \
 	./$(DEPDIR)/formula_value_stack.Plo ./$(DEPDIR)/global.Plo \
 	./$(DEPDIR)/info.Plo ./$(DEPDIR)/interface.Plo \
+	./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Plo \
+	./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Plo \
 	./$(DEPDIR)/ixion_test.Po ./$(DEPDIR)/ixion_test_track_deps.Po \
 	./$(DEPDIR)/lexer_tokens.Plo ./$(DEPDIR)/matrix.Plo \
 	./$(DEPDIR)/mem_str_buf.Plo ./$(DEPDIR)/model_context.Plo \
@@ -305,12 +310,13 @@ AM_V_CCLD = $(am__v_CCLD_@AM_V@)
 am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
-SOURCES = $(ixion_@IXION_API_VERSION@_cuda_la_SOURCES) \
+SOURCES = $(ixion_@IXION_API_VERSION@_vulkan_la_SOURCES) \
 	$(libixion_@IXION_API_VERSION@_la_SOURCES) \
 	$(compute_engine_test_SOURCES) \
 	$(dirty_cell_tracker_test_SOURCES) $(document_test_SOURCES) \
 	$(ixion_test_SOURCES) $(ixion_test_track_deps_SOURCES)
-DIST_SOURCES = $(am__ixion_@IXION_API_VERSION@_cuda_la_SOURCES_DIST) \
+DIST_SOURCES =  \
+	$(am__ixion_@IXION_API_VERSION@_vulkan_la_SOURCES_DIST) \
 	$(am__libixion_@IXION_API_VERSION@_la_SOURCES_DIST) \
 	$(compute_engine_test_SOURCES) \
 	$(dirty_cell_tracker_test_SOURCES) $(document_test_SOURCES) \
@@ -563,7 +569,7 @@ EGREP = @EGREP@
 EXEEXT = @EXEEXT@
 FGREP = @FGREP@
 GREP = @GREP@
-HAVE_CXX11 = @HAVE_CXX11@
+HAVE_CXX17 = @HAVE_CXX17@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -621,6 +627,8 @@ SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 STRIP = @STRIP@
 VERSION = @VERSION@
+VULKAN_CFLAGS = @VULKAN_CFLAGS@
+VULKAN_LIBS = @VULKAN_LIBS@
 abs_builddir = @abs_builddir@
 abs_srcdir = @abs_srcdir@
 abs_top_builddir = @abs_top_builddir@
@@ -684,35 +692,47 @@ AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/src/include \
 lib_LTLIBRARIES = libixion-@IXION_API_VERSION@.la
 libixion_@IXION_API_VERSION@_la_SOURCES = address.cpp \
 	address_iterator.cpp calc_status.hpp calc_status.cpp cell.cpp \
-	cell_access.cpp compute_engine.cpp concrete_formula_tokens.hpp \
-	concrete_formula_tokens.cpp config.cpp debug.hpp debug.cpp \
-	dirty_cell_tracker.cpp document.cpp exceptions.cpp formula.cpp \
-	formula_calc.cpp formula_function_opcode.cpp \
-	formula_functions.hpp formula_functions.cpp \
-	formula_interpreter.hpp formula_interpreter.cpp \
-	formula_lexer.hpp formula_lexer.cpp formula_name_resolver.cpp \
-	formula_parser.hpp formula_parser.cpp formula_result.cpp \
-	formula_tokens.cpp formula_value_stack.hpp \
-	formula_value_stack.cpp global.cpp info.cpp lexer_tokens.hpp \
-	lexer_tokens.cpp matrix.cpp mem_str_buf.cpp model_context.cpp \
-	model_context_impl.hpp model_context_impl.cpp \
-	model_iterator.cpp model_types.hpp model_types.cpp module.cpp \
-	named_expressions_iterator.cpp queue_entry.hpp queue_entry.cpp \
-	table.cpp types.cpp utils.hpp utils.cpp workbook.hpp \
-	workbook.cpp interface.cpp $(am__append_2)
+	cell_access.cpp column_store_type.hpp compute_engine.cpp \
+	concrete_formula_tokens.hpp concrete_formula_tokens.cpp \
+	config.cpp debug.hpp debug.cpp dirty_cell_tracker.cpp \
+	document.cpp exceptions.cpp formula.cpp formula_calc.cpp \
+	formula_function_opcode.cpp formula_functions.hpp \
+	formula_functions.cpp formula_interpreter.hpp \
+	formula_interpreter.cpp formula_lexer.hpp formula_lexer.cpp \
+	formula_name_resolver.cpp formula_parser.hpp \
+	formula_parser.cpp formula_result.cpp formula_tokens.cpp \
+	formula_value_stack.hpp formula_value_stack.cpp global.cpp \
+	info.cpp lexer_tokens.hpp lexer_tokens.cpp matrix.cpp \
+	mem_str_buf.cpp model_context.cpp model_context_impl.hpp \
+	model_context_impl.cpp model_iterator.cpp model_types.hpp \
+	model_types.cpp module.cpp named_expressions_iterator.cpp \
+	queue_entry.hpp queue_entry.cpp table.cpp types.cpp utils.hpp \
+	utils.cpp workbook.hpp workbook.cpp interface.cpp \
+	$(am__append_2)
 
-# CUDA module
-@BUILD_CUDA_TRUE@pkglib_LTLIBRARIES = ixion-@IXION_API_VERSION@-cuda.la
-@BUILD_CUDA_TRUE@ixion_@IXION_API_VERSION@_cuda_la_SOURCES = \
-@BUILD_CUDA_TRUE@	compute_engine_cuda.hpp \
-@BUILD_CUDA_TRUE@	compute_engine_cuda.cpp
+# VULKAN module
+@BUILD_VULKAN_TRUE@pkglib_LTLIBRARIES = ixion-@IXION_API_VERSION@-vulkan.la
+@BUILD_VULKAN_TRUE@ixion_@IXION_API_VERSION@_vulkan_la_SOURCES = \
+@BUILD_VULKAN_TRUE@	compute_engine_vulkan.hpp \
+@BUILD_VULKAN_TRUE@	compute_engine_vulkan.cpp \
+@BUILD_VULKAN_TRUE@	vulkan_obj.hpp \
+@BUILD_VULKAN_TRUE@	vulkan_obj.cpp
 
-@BUILD_CUDA_TRUE@ixion_@IXION_API_VERSION@_cuda_la_LDFLAGS = -module -avoid-version -export-symbols-regex register_module
-@BUILD_CUDA_TRUE@ixion_@IXION_API_VERSION@_cuda_la_LIBADD = \
-@BUILD_CUDA_TRUE@	libixion-@IXION_API_VERSION@.la
+@BUILD_VULKAN_TRUE@ixion_@IXION_API_VERSION@_vulkan_la_LDFLAGS = \
+@BUILD_VULKAN_TRUE@	-module -avoid-version -export-symbols-regex \
+@BUILD_VULKAN_TRUE@	register_module
+
+@BUILD_VULKAN_TRUE@ixion_@IXION_API_VERSION@_vulkan_la_LIBADD = \
+@BUILD_VULKAN_TRUE@	libixion-@IXION_API_VERSION@.la \
+@BUILD_VULKAN_TRUE@	$(VULKAN_LIBS)
+
+@BUILD_VULKAN_TRUE@ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS = \
+@BUILD_VULKAN_TRUE@	$(AM_CPPFLAGS) \
+@BUILD_VULKAN_TRUE@	$(VULKAN_CPPFLAGS)
 
 libixion_@IXION_API_VERSION@_la_LDFLAGS = \
 	-no-undefined \
+	-Wl,-rpath,'$$ORIGIN' -Wl,-rpath,'$$ORIGIN/$(PACKAGE)' \
 	$(BOOST_FILESYSTEM_LDFLAGS)
 
 libixion_@IXION_API_VERSION@_la_LIBADD = \
@@ -741,7 +761,7 @@ dirty_cell_tracker_test_SOURCES = dirty_cell_tracker_test.cpp
 dirty_cell_tracker_test_LDADD = \
 	libixion-@IXION_API_VERSION@.la
 
-AM_TESTS_ENVIRONMENT = IXION_MODULE_PATH=.libs; export IXION_MODULE_PATH;
+AM_TESTS_ENVIRONMENT = 
 all: all-am
 
 .SUFFIXES:
@@ -857,8 +877,8 @@ clean-pkglibLTLIBRARIES:
 	  rm -f $${locs}; \
 	}
 
-ixion-@IXION_API_VERSION@-cuda.la: $(ixion_@IXION_API_VERSION@_cuda_la_OBJECTS) $(ixion_@IXION_API_VERSION@_cuda_la_DEPENDENCIES) $(EXTRA_ixion_@IXION_API_VERSION@_cuda_la_DEPENDENCIES) 
-	$(AM_V_CXXLD)$(ixion_@IXION_API_VERSION@_cuda_la_LINK) $(am_ixion_@IXION_API_VERSION@_cuda_la_rpath) $(ixion_@IXION_API_VERSION@_cuda_la_OBJECTS) $(ixion_@IXION_API_VERSION@_cuda_la_LIBADD) $(LIBS)
+ixion-@IXION_API_VERSION@-vulkan.la: $(ixion_@IXION_API_VERSION@_vulkan_la_OBJECTS) $(ixion_@IXION_API_VERSION@_vulkan_la_DEPENDENCIES) $(EXTRA_ixion_@IXION_API_VERSION@_vulkan_la_DEPENDENCIES) 
+	$(AM_V_CXXLD)$(ixion_@IXION_API_VERSION@_vulkan_la_LINK) $(am_ixion_@IXION_API_VERSION@_vulkan_la_rpath) $(ixion_@IXION_API_VERSION@_vulkan_la_OBJECTS) $(ixion_@IXION_API_VERSION@_vulkan_la_LIBADD) $(LIBS)
 
 libixion-@IXION_API_VERSION@.la: $(libixion_@IXION_API_VERSION@_la_OBJECTS) $(libixion_@IXION_API_VERSION@_la_DEPENDENCIES) $(EXTRA_libixion_@IXION_API_VERSION@_la_DEPENDENCIES) 
 	$(AM_V_CXXLD)$(libixion_@IXION_API_VERSION@_la_LINK) -rpath $(libdir) $(libixion_@IXION_API_VERSION@_la_OBJECTS) $(libixion_@IXION_API_VERSION@_la_LIBADD) $(LIBS)
@@ -896,7 +916,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cell_access.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cell_queue_manager.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/compute_engine.Plo@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/compute_engine_cuda.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/compute_engine_test.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/concrete_formula_tokens.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/config.Plo@am__quote@ # am--include-marker
@@ -920,6 +939,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/global.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/info.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/interface.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_test.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_test_track_deps.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/lexer_tokens.Plo@am__quote@ # am--include-marker
@@ -963,6 +984,20 @@ am--depfiles: $(am__depfiles_remade)
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='$<' object='$@' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(LTCXXCOMPILE) -c -o $@ $<
+
+ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo: compute_engine_vulkan.cpp
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo -MD -MP -MF $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Tpo -c -o ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo `test -f 'compute_engine_vulkan.cpp' || echo '$(srcdir)/'`compute_engine_vulkan.cpp
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Tpo $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Plo
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='compute_engine_vulkan.cpp' object='ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.lo `test -f 'compute_engine_vulkan.cpp' || echo '$(srcdir)/'`compute_engine_vulkan.cpp
+
+ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo: vulkan_obj.cpp
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo -MD -MP -MF $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Tpo -c -o ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo `test -f 'vulkan_obj.cpp' || echo '$(srcdir)/'`vulkan_obj.cpp
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Tpo $(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Plo
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='vulkan_obj.cpp' object='ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.lo `test -f 'vulkan_obj.cpp' || echo '$(srcdir)/'`vulkan_obj.cpp
 
 mostlyclean-libtool:
 	-rm -f *.lo
@@ -1301,7 +1336,6 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/cell_access.Plo
 	-rm -f ./$(DEPDIR)/cell_queue_manager.Plo
 	-rm -f ./$(DEPDIR)/compute_engine.Plo
-	-rm -f ./$(DEPDIR)/compute_engine_cuda.Plo
 	-rm -f ./$(DEPDIR)/compute_engine_test.Po
 	-rm -f ./$(DEPDIR)/concrete_formula_tokens.Plo
 	-rm -f ./$(DEPDIR)/config.Plo
@@ -1325,6 +1359,8 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/global.Plo
 	-rm -f ./$(DEPDIR)/info.Plo
 	-rm -f ./$(DEPDIR)/interface.Plo
+	-rm -f ./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Plo
+	-rm -f ./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Plo
 	-rm -f ./$(DEPDIR)/ixion_test.Po
 	-rm -f ./$(DEPDIR)/ixion_test_track_deps.Po
 	-rm -f ./$(DEPDIR)/lexer_tokens.Plo
@@ -1393,7 +1429,6 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/cell_access.Plo
 	-rm -f ./$(DEPDIR)/cell_queue_manager.Plo
 	-rm -f ./$(DEPDIR)/compute_engine.Plo
-	-rm -f ./$(DEPDIR)/compute_engine_cuda.Plo
 	-rm -f ./$(DEPDIR)/compute_engine_test.Po
 	-rm -f ./$(DEPDIR)/concrete_formula_tokens.Plo
 	-rm -f ./$(DEPDIR)/config.Plo
@@ -1417,6 +1452,8 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/global.Plo
 	-rm -f ./$(DEPDIR)/info.Plo
 	-rm -f ./$(DEPDIR)/interface.Plo
+	-rm -f ./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-compute_engine_vulkan.Plo
+	-rm -f ./$(DEPDIR)/ixion_@IXION_API_VERSION@_vulkan_la-vulkan_obj.Plo
 	-rm -f ./$(DEPDIR)/ixion_test.Po
 	-rm -f ./$(DEPDIR)/ixion_test_track_deps.Po
 	-rm -f ./$(DEPDIR)/lexer_tokens.Plo

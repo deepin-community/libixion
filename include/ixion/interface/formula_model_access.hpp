@@ -8,9 +8,9 @@
 #ifndef INCLUDED_IXION_INTERFACE_MODEL_CONTEXT_HPP
 #define INCLUDED_IXION_INTERFACE_MODEL_CONTEXT_HPP
 
-#include "ixion/formula_tokens.hpp"
-#include "ixion/types.hpp"
-#include "ixion/exceptions.hpp"
+#include "../formula_tokens.hpp"
+#include "../types.hpp"
+#include "../exceptions.hpp"
 
 #include <string>
 #include <vector>
@@ -86,7 +86,7 @@ public:
      * @return pointer to a string value if the cell stores a valid string
      *         value, else nullptr.
      */
-    virtual const std::string* get_string_value(const abs_address_t& addr) const = 0;
+    virtual std::string_view get_string_value(const abs_address_t& addr) const = 0;
     virtual const formula_cell* get_formula_cell(const abs_address_t& addr) const = 0;
     virtual formula_cell* get_formula_cell(const abs_address_t& addr) = 0;
 
@@ -101,7 +101,7 @@ public:
      *
      * @return const pointer to the token set if exists, nullptr otherwise.
      */
-    virtual const named_expression_t* get_named_expression(sheet_t sheet, const std::string& name) const = 0;
+    virtual const named_expression_t* get_named_expression(sheet_t sheet, std::string_view name) const = 0;
 
     virtual double count_range(const abs_range_t& range, const values_t& values_type) const = 0;
 
@@ -133,27 +133,34 @@ public:
      * named columns.  It is used when resolving a table reference that refers
      * to a cell or a range of cells by the table name and/or column name.
      *
-     * @return non-NULL pointer to the table storage inside the model, or NULL
-     *         if no table is present or supported by the model
+     * @return non-null pointer to the table storage inside the model, or
+     *         nullptr if no table is present or supported by the model
      *         implementation.
      */
     virtual table_handler* get_table_handler();
 
     virtual const table_handler* get_table_handler() const;
 
-    virtual string_id_t append_string(const char* p, size_t n) = 0;
-    virtual string_id_t add_string(const char* p, size_t n) = 0;
+    /**
+     * Try to add a new string to the string pool. If the same string already
+     * exists in the pool, the new string won't be added to the pool.
+     *
+     * @param s string to try to add to the pool.
+     *
+     * @return string_id_t integer value representing the string.
+     */
+    virtual string_id_t add_string(std::string_view s) = 0;
+
     virtual const std::string* get_string(string_id_t identifier) const = 0;
 
     /**
      * Get the index of sheet from sheet name.
      *
-     * @param p pointer to the first character of the sheet name string.
-     * @param n length of the sheet name string.
+     * @param name sheet name.
      *
      * @return sheet index
      */
-    virtual sheet_t get_sheet_index(const char* p, size_t n) const = 0;
+    virtual sheet_t get_sheet_index(std::string_view name) const = 0;
 
     virtual std::string get_sheet_name(sheet_t sheet) const = 0;
 

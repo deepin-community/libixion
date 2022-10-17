@@ -6,11 +6,11 @@ AM_CPPFLAGS = \
 	$(MDDS_CFLAGS) \
 	$(BOOST_CPPFLAGS)
 
-if BUILD_CUDA
+if BUILD_VULKAN
 
-AM_CPPFLAGS += -DBUILD_CUDA
+AM_CPPFLAGS += -DBUILD_VULKAN
 
-endif # BUILD_CUDA
+endif # BUILD_VULKAN
 
 check_PROGRAMS = \
 	document-test \
@@ -27,6 +27,7 @@ libixion_@IXION_API_VERSION@_la_SOURCES = \
 	calc_status.cpp \
 	cell.cpp \
 	cell_access.cpp \
+	column_store_type.hpp \
 	compute_engine.cpp \
 	concrete_formula_tokens.hpp \
 	concrete_formula_tokens.cpp \
@@ -76,20 +77,30 @@ libixion_@IXION_API_VERSION@_la_SOURCES = \
 	workbook.cpp \
 	interface.cpp
 
-if BUILD_CUDA
+if BUILD_VULKAN
 
-# CUDA module
+# VULKAN module
 
-pkglib_LTLIBRARIES = ixion-@IXION_API_VERSION@-cuda.la
-ixion_@IXION_API_VERSION@_cuda_la_SOURCES = \
-	compute_engine_cuda.hpp \
-	compute_engine_cuda.cpp
+pkglib_LTLIBRARIES = ixion-@IXION_API_VERSION@-vulkan.la
+ixion_@IXION_API_VERSION@_vulkan_la_SOURCES = \
+	compute_engine_vulkan.hpp \
+	compute_engine_vulkan.cpp \
+	vulkan_obj.hpp \
+	vulkan_obj.cpp
 
-ixion_@IXION_API_VERSION@_cuda_la_LDFLAGS = -module -avoid-version -export-symbols-regex register_module
-ixion_@IXION_API_VERSION@_cuda_la_LIBADD = \
-	libixion-@IXION_API_VERSION@.la
+ixion_@IXION_API_VERSION@_vulkan_la_LDFLAGS = \
+	-module -avoid-version -export-symbols-regex \
+	register_module
 
-endif # BUILD_CUDA
+ixion_@IXION_API_VERSION@_vulkan_la_LIBADD = \
+	libixion-@IXION_API_VERSION@.la \
+	$(VULKAN_LIBS)
+
+ixion_@IXION_API_VERSION@_vulkan_la_CPPFLAGS = \
+	$(AM_CPPFLAGS) \
+	$(VULKAN_CPPFLAGS)
+
+endif # BUILD_VULKAN
 
 if IXION_THREADS
 
@@ -101,6 +112,7 @@ endif
 
 libixion_@IXION_API_VERSION@_la_LDFLAGS = \
 	-no-undefined \
+	-Wl,-rpath,'$$ORIGIN' -Wl,-rpath,'$$ORIGIN/$(PACKAGE)' \
 	$(BOOST_FILESYSTEM_LDFLAGS)
 
 libixion_@IXION_API_VERSION@_la_LIBADD = \
@@ -130,7 +142,7 @@ dirty_cell_tracker_test_SOURCES = dirty_cell_tracker_test.cpp
 dirty_cell_tracker_test_LDADD = \
 	libixion-@IXION_API_VERSION@.la
 
-AM_TESTS_ENVIRONMENT = IXION_MODULE_PATH=.libs; export IXION_MODULE_PATH;
+AM_TESTS_ENVIRONMENT =
 
 TESTS = \
 	document-test \

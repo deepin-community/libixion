@@ -12,6 +12,7 @@
 #include "ixion/formula_result.hpp"
 #include "ixion/matrix.hpp"
 #include "ixion/interface/session_handler.hpp"
+#include "ixion/model_iterator.hpp"
 
 #include "calc_status.hpp"
 #include "model_types.hpp"
@@ -27,41 +28,39 @@ using std::endl;
 
 namespace ixion { namespace detail {
 
-string_id_t safe_string_pool::append_string_unsafe(const char* p, size_t n)
+string_id_t safe_string_pool::append_string_unsafe(std::string_view s)
 {
-    assert(p);
-    assert(n);
+    assert(!s.empty());
 
     string_id_t str_id = m_strings.size();
-    m_strings.push_back(make_unique<std::string>(p, n));
-    p = m_strings.back()->data();
-    mem_str_buf key(p, n);
-    m_string_map.insert(string_map_type::value_type(key, str_id));
+    m_strings.push_back(std::make_unique<std::string>(s));
+    s = *m_strings.back();
+    m_string_map.insert(string_map_type::value_type(s, str_id));
     return str_id;
 }
 
-string_id_t safe_string_pool::append_string(const char* p, size_t n)
+string_id_t safe_string_pool::append_string(std::string_view s)
 {
-    if (!p || !n)
+    if (s.empty())
         // Never add an empty or invalid string.
         return empty_string_id;
 
     std::unique_lock<std::mutex> lock(m_mtx);
-    return append_string_unsafe(p, n);
+    return append_string_unsafe(s);
 }
 
-string_id_t safe_string_pool::add_string(const char* p, size_t n)
+string_id_t safe_string_pool::add_string(std::string_view s)
 {
-    if (!p || !n)
+    if (s.empty())
         // Never add an empty or invalid string.
         return empty_string_id;
 
     std::unique_lock<std::mutex> lock(m_mtx);
-    string_map_type::iterator itr = m_string_map.find(mem_str_buf(p, n));
+    string_map_type::iterator itr = m_string_map.find(s);
     if (itr != m_string_map.end())
         return itr->second;
 
-    return append_string_unsafe(p, n);
+    return append_string_unsafe(s);
 }
 
 const std::string* safe_string_pool::get_string(string_id_t identifier) const
@@ -97,15 +96,15 @@ void safe_string_pool::dump_strings() const
         auto it = m_string_map.begin(), ite = m_string_map.end();
         for (; it != ite; ++it)
         {
-            mem_str_buf key = it->first;
-            cout << "* key: '" << key << "' (" << (void*)key.get() << "; " << key.size() << "), value: " << it->second << endl;
+            std::string_view key = it->first;
+            cout << "* key: '" << key << "' (" << (void*)key.data() << "; " << key.size() << "), value: " << it->second << endl;
         }
     }
 }
 
-string_id_t safe_string_pool::get_identifier_from_string(const char* p, size_t n) const
+string_id_t safe_string_pool::get_identifier_from_string(std::string_view s) const
 {
-    string_map_type::const_iterator it = m_string_map.find(mem_str_buf(p, n));
+    string_map_type::const_iterator it = m_string_map.find(s);
     return it == m_string_map.end() ? empty_string_id : it->second;
 }
 
@@ -141,7 +140,48 @@ void set_grouped_formula_cells_to_workbook(
     }
 }
 
+/**
+ * The name of a named expression can only contain letters, numbers or an
+ * underscore character.
+ */
+void check_named_exp_name_or_throw(const char* p, size_t n)
+{
+    const char* p_end = p + n;
+
+    if (p == p_end)
+        throw model_context_error(
+            "empty name is not allowed", model_context_error::invalid_named_expression);
+
+    if ('0' <= *p && *p <= '9')
+        throw model_context_error(
+            "name cannot start with a numeric character", model_context_error::invalid_named_expression);
+
+    if (*p == '.')
+        throw model_context_error(
+            "name cannot start with a dot", model_context_error::invalid_named_expression);
+
+    for (; p != p_end; ++p)
+    {
+        char c = *p;
+        if ('a' <= c && c <= 'z')
+            continue;
+
+        if ('A' <= c && c <= 'Z')
+            continue;
+
+        if ('0' <= c && c <= '9')
+            continue;
+
+        if (c == '_' || c == '.')
+            continue;
+
+        std::ostringstream os;
+        os << "name contains invalid character '" << c << "'";
+        throw model_context_error(os.str(), model_context_error::invalid_named_expression);
+    }
 }
+
+} // anonymous namespace
 
 model_context_impl::model_context_impl(model_context& parent, const rc_size_t& sheet_size) :
     m_parent(parent),
@@ -169,9 +209,10 @@ void model_context_impl::notify(formula_event_t event)
 }
 
 void model_context_impl::set_named_expression(
-    const char* p, size_t n, const abs_address_t& origin, formula_tokens_t&& expr)
+    std::string name, const abs_address_t& origin, formula_tokens_t&& expr)
 {
-    std::string name(p, n);
+    check_named_exp_name_or_throw(name.data(), name.size());
+
     IXION_TRACE("named expression: name='" << name << "'");
     m_named_expressions.insert(
         detail::named_expressions_t::value_type(
@@ -182,10 +223,11 @@ void model_context_impl::set_named_expression(
 }
 
 void model_context_impl::set_named_expression(
-    sheet_t sheet, const char* p, size_t n, const abs_address_t& origin, formula_tokens_t&& expr)
+    sheet_t sheet, std::string name, const abs_address_t& origin, formula_tokens_t&& expr)
 {
+    check_named_exp_name_or_throw(name.data(), name.size());
+
     detail::named_expressions_t& ns = m_sheets.at(sheet).get_named_expressions();
-    std::string name(p, n);
     IXION_TRACE("named expression: name='" << name << "'");
     ns.insert(
         detail::named_expressions_t::value_type(
@@ -195,20 +237,20 @@ void model_context_impl::set_named_expression(
     );
 }
 
-const named_expression_t* model_context_impl::get_named_expression(const std::string& name) const
+const named_expression_t* model_context_impl::get_named_expression(std::string_view name) const
 {
-    named_expressions_t::const_iterator itr = m_named_expressions.find(name);
+    named_expressions_t::const_iterator itr = m_named_expressions.find(std::string(name));
     return itr == m_named_expressions.end() ? nullptr : &itr->second;
 }
 
-const named_expression_t* model_context_impl::get_named_expression(sheet_t sheet, const std::string& name) const
+const named_expression_t* model_context_impl::get_named_expression(sheet_t sheet, std::string_view name) const
 {
     const worksheet* ws = fetch_sheet(sheet);
 
     if (ws)
     {
         const named_expressions_t& ns = ws->get_named_expressions();
-        auto it = ns.find(name);
+        auto it = ns.find(std::string(name));
         if (it != ns.end())
             return &it->second;
     }
@@ -217,7 +259,7 @@ const named_expression_t* model_context_impl::get_named_expression(sheet_t sheet
     return get_named_expression(name);
 }
 
-sheet_t model_context_impl::get_sheet_index(const char* p, size_t n) const
+sheet_t model_context_impl::get_sheet_index(std::string_view name) const
 {
     strings_type::const_iterator itr_beg = m_sheet_names.begin(), itr_end = m_sheet_names.end();
     for (strings_type::const_iterator itr = itr_beg; itr != itr_end; ++itr)
@@ -226,8 +268,7 @@ sheet_t model_context_impl::get_sheet_index(const char* p, size_t n) const
         if (s.empty())
             continue;
 
-        mem_str_buf s1(&s[0], s.size()), s2(p, n);
-        if (s1 == s2)
+        if (s == name)
             return static_cast<sheet_t>(std::distance(itr_beg, itr));
     }
     return invalid_sheet;
@@ -293,13 +334,16 @@ void model_context_impl::set_cell_values(sheet_t sheet, std::initializer_list<mo
             switch (c.type)
             {
                 case celltype_t::numeric:
-                    set_numeric_cell(pos, c.value.numeric);
+                    set_numeric_cell(pos, std::get<double>(c.value));
                     break;
                 case celltype_t::string:
-                    set_string_cell(pos, c.value.string, std::strlen(c.value.string));
+                {
+                    auto s = std::get<std::string_view>(c.value);
+                    set_string_cell(pos, s);
                     break;
+                }
                 case celltype_t::boolean:
-                    set_boolean_cell(pos, c.value.boolean);
+                    set_boolean_cell(pos, std::get<bool>(c.value));
                     break;
                 default:
                     ;
@@ -312,14 +356,14 @@ void model_context_impl::set_cell_values(sheet_t sheet, std::initializer_list<mo
     }
 }
 
-string_id_t model_context_impl::append_string(const char* p, size_t n)
+string_id_t model_context_impl::append_string(std::string_view s)
 {
-    return m_str_pool.append_string(p, n);
+    return m_str_pool.append_string(s);
 }
 
-string_id_t model_context_impl::add_string(const char* p, size_t n)
+string_id_t model_context_impl::add_string(std::string_view s)
 {
-    return m_str_pool.add_string(p, n);
+    return m_str_pool.add_string(s);
 }
 
 const std::string* model_context_impl::get_string(string_id_t identifier) const
@@ -479,34 +523,6 @@ double model_context_impl::count_range(const abs_range_t& range, const values_t&
     return ret;
 }
 
-abs_address_set_t model_context_impl::get_all_formula_cells() const
-{
-    abs_address_set_t cells;
-
-    for (size_t sid = 0; sid < m_sheets.size(); ++sid)
-    {
-        const worksheet& sh = m_sheets[sid];
-        for (size_t cid = 0; cid < sh.size(); ++cid)
-        {
-            const column_store_t& col = sh[cid];
-            column_store_t::const_iterator it = col.begin();
-            column_store_t::const_iterator ite = col.end();
-            for (; it != ite; ++it)
-            {
-                if (it->type != element_type_formula)
-                    continue;
-
-                row_t row_id = it->position;
-                abs_address_t pos(sid, row_id, cid);
-                for (size_t i = 0; i < it->size; ++i, ++pos.row)
-                    cells.insert(pos);
-            }
-        }
-    }
-
-    return cells;
-}
-
 bool model_context_impl::empty() const
 {
     return m_sheets.empty();
@@ -535,6 +551,12 @@ const detail::named_expressions_t& model_context_impl::get_named_expressions(she
 {
     const worksheet& sh = m_sheets.at(sheet);
     return sh.get_named_expressions();
+}
+
+model_iterator model_context_impl::get_model_iterator(
+    sheet_t sheet, rc_direction_t dir, const abs_rc_range_t& range) const
+{
+    return model_iterator(*this, sheet, range, dir);
 }
 
 void model_context_impl::set_sheet_size(const rc_size_t& sheet_size)
@@ -576,10 +598,10 @@ void model_context_impl::set_boolean_cell(const abs_address_t& addr, bool val)
     pos_hint = col_store.set(pos_hint, addr.row, val);
 }
 
-void model_context_impl::set_string_cell(const abs_address_t& addr, const char* p, size_t n)
+void model_context_impl::set_string_cell(const abs_address_t& addr, std::string_view s)
 {
     worksheet& sheet = m_sheets.at(addr.sheet);
-    string_id_t str_id = add_string(p, n);
+    string_id_t str_id = add_string(s);
     column_store_t& col_store = sheet.at(addr.column);
     column_store_t::iterator& pos_hint = sheet.get_pos_hint(addr.column);
     pos_hint = col_store.set(pos_hint, addr.row, str_id);
@@ -651,7 +673,7 @@ void model_context_impl::set_string_cell(const abs_address_t& addr, string_id_t 
 formula_cell* model_context_impl::set_formula_cell(
     const abs_address_t& addr, const formula_tokens_store_ptr_t& tokens)
 {
-    std::unique_ptr<formula_cell> fcell = ixion::make_unique<formula_cell>(tokens);
+    std::unique_ptr<formula_cell> fcell = std::make_unique<formula_cell>(tokens);
 
     worksheet& sheet = m_sheets.at(addr.sheet);
     column_store_t& col_store = sheet.at(addr.column);
@@ -664,7 +686,7 @@ formula_cell* model_context_impl::set_formula_cell(
 formula_cell* model_context_impl::set_formula_cell(
     const abs_address_t& addr, const formula_tokens_store_ptr_t& tokens, formula_result result)
 {
-    std::unique_ptr<formula_cell> fcell = ixion::make_unique<formula_cell>(tokens);
+    std::unique_ptr<formula_cell> fcell = std::make_unique<formula_cell>(tokens);
 
     worksheet& sheet = m_sheets.at(addr.sheet);
     column_store_t& col_store = sheet.at(addr.column);
@@ -701,7 +723,7 @@ void model_context_impl::set_grouped_formula_cells(
         throw std::invalid_argument("dimension of the cached result differs from the size of the group.");
 
     calc_status_ptr_t cs(new calc_status(group_size));
-    cs->result = ixion::make_unique<formula_result>(std::move(result));
+    cs->result = std::make_unique<formula_result>(std::move(result));
     set_grouped_formula_cells_to_workbook(m_sheets, group_range.first, group_size, cs, ts);
 }
 
@@ -883,7 +905,7 @@ string_id_t model_context_impl::get_string_identifier(const abs_address_t& addr)
     return empty_string_id;
 }
 
-const std::string* model_context_impl::get_string_value(const abs_address_t& addr) const
+std::string_view model_context_impl::get_string_value(const abs_address_t& addr) const
 {
     const column_store_t& col_store = m_sheets.at(addr.sheet).at(addr.column);
     auto pos = col_store.position(addr.row);
@@ -893,7 +915,8 @@ const std::string* model_context_impl::get_string_value(const abs_address_t& add
         case element_type_string:
         {
             string_id_t sid = string_element_block::at(*pos.first->data, pos.second);
-            return m_str_pool.get_string(sid);
+            const std::string* p = m_str_pool.get_string(sid);
+            return p ? *p : std::string_view{};
         }
         case element_type_formula:
         {
@@ -901,17 +924,17 @@ const std::string* model_context_impl::get_string_value(const abs_address_t& add
             return p->get_string(m_formula_res_wait_policy);
         }
         case element_type_empty:
-            return &empty_string;
+            return empty_string;
         default:
             ;
     }
 
-    return nullptr;
+    return std::string_view{};
 }
 
-string_id_t model_context_impl::get_identifier_from_string(const char* p, size_t n) const
+string_id_t model_context_impl::get_identifier_from_string(std::string_view s) const
 {
-    return m_str_pool.get_identifier_from_string(p, n);
+    return m_str_pool.get_identifier_from_string(s);
 }
 
 const formula_cell* model_context_impl::get_formula_cell(const abs_address_t& addr) const

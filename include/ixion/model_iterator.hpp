@@ -8,14 +8,15 @@
 #ifndef INCLUDED_IXION_MODEL_ITERATOR_HPP
 #define INCLUDED_IXION_MODEL_ITERATOR_HPP
 
-#include "ixion/types.hpp"
+#include "types.hpp"
 
 #include <memory>
 #include <iosfwd>
+#include <variant>
 
 namespace ixion {
 
-class model_context;
+namespace detail { class model_context_impl; }
 class formula_cell;
 struct abs_rc_range_t;
 
@@ -25,26 +26,20 @@ public:
     class impl;
 
 private:
-    friend class model_context;
+    friend class detail::model_context_impl;
     std::unique_ptr<model_iterator::impl> mp_impl;
 
-    model_iterator(const model_context& cxt, sheet_t sheet, const abs_rc_range_t& range, rc_direction_t dir);
+    model_iterator(const detail::model_context_impl& cxt, sheet_t sheet, const abs_rc_range_t& range, rc_direction_t dir);
 public:
 
     struct IXION_DLLPUBLIC cell
     {
+        using value_type = std::variant<bool, double, string_id_t, const formula_cell*>;
+
         row_t row;
         col_t col;
         celltype_t type;
-
-        union
-        {
-            bool boolean;
-            double numeric;
-            string_id_t string;
-            const formula_cell* formula;
-
-        } value;
+        value_type value;
 
         cell();
         cell(row_t _row, col_t _col);

@@ -6,9 +6,12 @@
  */
 
 #include "session_handler.hpp"
+#include "app_common.hpp"
+
 #include "ixion/formula_name_resolver.hpp"
 #include "ixion/formula_result.hpp"
 #include "ixion/formula_tokens.hpp"
+#include "ixion/config.hpp"
 
 #include <string>
 #include <iostream>
@@ -26,7 +29,7 @@ session_handler::factory::~factory() {}
 
 std::unique_ptr<iface::session_handler> session_handler::factory::create()
 {
-    return ixion::make_unique<session_handler>(m_context, m_show_sheet_name);
+    return std::make_unique<session_handler>(m_context, m_show_sheet_name);
 }
 
 void session_handler::factory::show_sheet_name(bool b)
@@ -49,7 +52,7 @@ struct session_handler::impl
 };
 
 session_handler::session_handler(const model_context& cxt, bool show_sheet_name) :
-    mp_impl(ixion::make_unique<impl>(cxt, show_sheet_name)) {}
+    mp_impl(std::make_unique<impl>(cxt, show_sheet_name)) {}
 
 session_handler::~session_handler() {}
 
@@ -60,7 +63,7 @@ void session_handler::begin_cell_interpret(const abs_address_t& pos)
     pos_display.set_absolute(false);
     mp_impl->m_cell_name = mp_impl->mp_resolver->get_name(pos_display, abs_address_t(), mp_impl->m_show_sheet_name);
 
-    mp_impl->m_buf << get_formula_result_output_separator() << endl;
+    mp_impl->m_buf << detail::get_formula_result_output_separator() << endl;
     mp_impl->m_buf << mp_impl->m_cell_name << ": ";
 }
 
@@ -74,19 +77,22 @@ void session_handler::set_result(const formula_result& result)
     mp_impl->m_buf << endl << mp_impl->m_cell_name << ": result = " << result.str(mp_impl->m_context) << endl;
 }
 
-void session_handler::set_invalid_expression(const char* msg)
+void session_handler::set_invalid_expression(std::string_view msg)
 {
     mp_impl->m_buf << endl << mp_impl->m_cell_name << ": invalid expression: " << msg << endl;
 }
 
-void session_handler::set_formula_error(const char* msg)
+void session_handler::set_formula_error(std::string_view msg)
 {
     mp_impl->m_buf << endl << mp_impl->m_cell_name << ": result = " << msg << endl;
 }
 
 void session_handler::push_token(fopcode_t fop)
 {
-    mp_impl->m_buf << get_formula_opcode_string(fop);
+    if (fop == fop_sep)
+        mp_impl->m_buf << mp_impl->m_context.get_config().sep_function_arg;
+    else
+        mp_impl->m_buf << get_formula_opcode_string(fop);
 }
 
 void session_handler::push_value(double val)

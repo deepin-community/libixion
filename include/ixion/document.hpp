@@ -8,14 +8,15 @@
 #ifndef INCLUDED_IXION_DOCUMENT_HPP
 #define INCLUDED_IXION_DOCUMENT_HPP
 
-#include "ixion/types.hpp"
+#include "types.hpp"
+#include "address.hpp"
 
 #include <memory>
 #include <string>
+#include <variant>
 
 namespace ixion {
 
-struct abs_address_t;
 class cell_access;
 
 /**
@@ -43,12 +44,7 @@ public:
         enum class cp_type { string, address };
         cp_type type;
 
-        union
-        {
-            struct { const char* str; size_t n; };
-            struct { sheet_t sheet; row_t row; col_t column; };
-
-        } value;
+        std::variant<std::string_view, ixion::abs_address_t> value;
 
         cell_pos(const char* p);
         cell_pos(const char* p, size_t n);
@@ -62,9 +58,7 @@ public:
 
     void set_numeric_cell(cell_pos pos, double val);
 
-    void set_string_cell(cell_pos pos, const char* p, size_t n);
-
-    void set_string_cell(cell_pos pos, const std::string& s);
+    void set_string_cell(cell_pos pos, std::string_view s);
 
     void set_boolean_cell(cell_pos pos, bool val);
 
@@ -72,9 +66,9 @@ public:
 
     double get_numeric_value(cell_pos pos) const;
 
-    const std::string* get_string_value(cell_pos pos) const;
+    std::string_view get_string_value(cell_pos pos) const;
 
-    void set_formula_cell(cell_pos pos, const std::string& formula);
+    void set_formula_cell(cell_pos pos, std::string_view formula);
 
     /**
      * Calculate all the "dirty" formula cells in the document.

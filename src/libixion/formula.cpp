@@ -45,11 +45,11 @@ std::string debug_print_formula_tokens(const formula_tokens_t& tokens)
 
 formula_tokens_t parse_formula_string(
     iface::formula_model_access& cxt, const abs_address_t& pos,
-    const formula_name_resolver& resolver, const char* p, size_t n)
+    const formula_name_resolver& resolver, std::string_view formula)
 {
-    IXION_TRACE("pos=" << pos.get_name() << "; formula='" << std::string(p, n) << "'");
+    IXION_TRACE("pos=" << pos.get_name() << "; formula='" << formula << "'");
     lexer_tokens_t lxr_tokens;
-    formula_lexer lexer(cxt.get_config(), p, n);
+    formula_lexer lexer(cxt.get_config(), formula.data(), formula.size());
     lexer.tokenize();
     lexer.swap_tokens(lxr_tokens);
 
@@ -68,17 +68,17 @@ formula_tokens_t parse_formula_string(
 }
 
 formula_tokens_t create_formula_error_tokens(
-    iface::formula_model_access& cxt, const char* p_src_formula, size_t n_src_formula,
-    const char* p_error, size_t n_error)
+    iface::formula_model_access& cxt, std::string_view src_formula,
+    std::string_view error)
 {
     formula_tokens_t tokens;
-    tokens.push_back(ixion::make_unique<error_token>(2));
+    tokens.push_back(std::make_unique<error_token>(2));
 
-    string_id_t sid_src_formula = cxt.add_string(p_src_formula, n_src_formula);
-    tokens.push_back(make_unique<string_token>(sid_src_formula));
+    string_id_t sid_src_formula = cxt.add_string(src_formula);
+    tokens.push_back(std::make_unique<string_token>(sid_src_formula));
 
-    string_id_t sid_error = cxt.add_string(p_error, n_error);
-    tokens.push_back(make_unique<string_token>(sid_error));
+    string_id_t sid_error = cxt.add_string(error);
+    tokens.push_back(std::make_unique<string_token>(sid_error));
 
     return tokens;
 }
@@ -141,7 +141,7 @@ public:
                 break;
             case fop_function:
             {
-                formula_function_t fop = static_cast<formula_function_t>(token.get_index());
+                formula_function_t fop = static_cast<formula_function_t>(token.get_uint32());
                 m_os << formula_functions::get_function_name(fop);
                 break;
             }
@@ -167,11 +167,11 @@ public:
             }
             case fop_string:
             {
-                const std::string* p = m_cxt.get_string(token.get_index());
+                const std::string* p = m_cxt.get_string(token.get_uint32());
                 if (p)
                     m_os << "\"" << *p << "\"";
                 else
-                    IXION_DEBUG("failed to get a string value for the identifier value of " << token.get_index());
+                    IXION_DEBUG("failed to get a string value for the identifier value of " << token.get_uint32());
 
                 break;
             }
@@ -260,7 +260,7 @@ bool has_volatile(const formula_tokens_t& tokens)
         if (t.get_opcode() != fop_function)
             continue;
 
-        formula_function_t func = static_cast<formula_function_t>(t.get_index());
+        formula_function_t func = static_cast<formula_function_t>(t.get_uint32());
         if (is_volatile(func))
             return true;
     }
@@ -288,7 +288,7 @@ void check_sheet_or_throw(const char* func_name, sheet_t sheet, const iface::for
 void register_formula_cell(
     iface::formula_model_access& cxt, const abs_address_t& pos, const formula_cell* cell)
 {
-#ifdef __IXION_DEBUG_UTILS
+#ifdef IXION_DEBUG_UTILS
     if (cell)
     {
         const formula_cell* check = cxt.get_formula_cell(pos);

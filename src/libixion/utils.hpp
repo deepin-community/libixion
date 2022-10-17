@@ -9,11 +9,19 @@
 #define INCLUDED_IXION_DETAIL_UTILS_HPP
 
 #include "ixion/types.hpp"
-#include "ixion/column_store_type.hpp"
+#include "column_store_type.hpp"
+
+#include <sstream>
 
 namespace ixion { namespace detail {
 
 celltype_t to_celltype(mdds::mtv::element_t mtv_type);
+
+template<std::size_t S, typename T>
+void ensure_max_size(const T& v)
+{
+    static_assert(sizeof(T) <= S, "The size of the value exceeded allowed size limit.");
+}
 
 }}
 

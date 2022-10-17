@@ -1,8 +1,22 @@
-libixion (0.16.1-4) UNRELEASED; urgency=medium
+libixion (0.17.0-3) unstable; urgency=medium
 
-  * update
+  * upload to unstable 
 
- -- Debian LibreOffice Maintainers <debian-openoffice@lists.debian.org>  Thu, 28 Jul 2022 18:21:21 +0800
+ -- Rene Engelhard <rene@debian.org>  Wed, 08 Dec 2021 19:40:26 +0100
+
+libixion (0.17.0-2) experimental; urgency=medium
+
+  * update debian/not-installed for 0.17 
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 06 Nov 2021 13:23:34 +0100
+
+libixion (0.17.0-1) experimental; urgency=medium
+
+  * New upstream version 0.17.0
+
+  * update mdds build-dep; remove mdds dep (not exported anymore)
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 06 Nov 2021 07:08:15 +0100
 
 libixion (0.16.1-4) unstable; urgency=medium
 

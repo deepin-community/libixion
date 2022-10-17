@@ -8,7 +8,7 @@
 #include "ixion/model_iterator.hpp"
 #include "ixion/global.hpp"
 #include "ixion/exceptions.hpp"
-#include "ixion/model_context.hpp"
+#include "model_context_impl.hpp"
 
 #include <mdds/multi_type_vector/collection.hpp>
 #include <sstream>
@@ -16,58 +16,29 @@
 
 namespace ixion {
 
-model_iterator::cell::cell() : row(0), col(0), type(celltype_t::empty) {}
+model_iterator::cell::cell() : row(0), col(0), type(celltype_t::empty), value(false) {}
 
 model_iterator::cell::cell(row_t _row, col_t _col) :
-    row(_row), col(_col), type(celltype_t::empty) {}
+    row(_row), col(_col), type(celltype_t::empty), value(false) {}
 
 model_iterator::cell::cell(row_t _row, col_t _col, bool _b) :
-    row(_row), col(_col), type(celltype_t::boolean)
-{
-    value.boolean = _b;
-}
+    row(_row), col(_col), type(celltype_t::boolean), value(_b) {}
 
 model_iterator::cell::cell(row_t _row, col_t _col, string_id_t _s) :
-    row(_row), col(_col), type(celltype_t::string)
-{
-    value.string = _s;
-}
+    row(_row), col(_col), type(celltype_t::string), value(_s) {}
 
 model_iterator::cell::cell(row_t _row, col_t _col, double _v) :
-    row(_row), col(_col), type(celltype_t::numeric)
-{
-    value.numeric = _v;
-}
+    row(_row), col(_col), type(celltype_t::numeric), value(_v) {}
 
 model_iterator::cell::cell(row_t _row, col_t _col, const formula_cell* _f) :
-    row(_row), col(_col), type(celltype_t::formula)
-{
-    value.formula = _f;
-}
+    row(_row), col(_col), type(celltype_t::formula), value(_f) {}
 
 bool model_iterator::cell::operator== (const cell& other) const
 {
     if (type != other.type || row != other.row || col != other.col)
         return false;
 
-    switch (type)
-    {
-        case celltype_t::empty:
-            return true;
-        case celltype_t::numeric:
-            return value.numeric == other.value.numeric;
-        case celltype_t::boolean:
-            return value.boolean == other.value.boolean;
-        case celltype_t::string:
-            return value.string == other.value.string;
-        case celltype_t::formula:
-            // Compare by the formula cell memory address.
-            return value.formula == other.value.formula;
-        default:
-            ;
-    }
-
-    return false;
+    return value == other.value;
 }
 
 bool model_iterator::cell::operator!= (const cell& other) const
@@ -120,22 +91,23 @@ class iterator_core_horizontal : public model_iterator::impl
         {
             case element_type_boolean:
                 m_current_cell.type = celltype_t::boolean;
-                m_current_cell.value.boolean = m_current_pos->get<boolean_element_block>();
+                m_current_cell.value = m_current_pos->get<boolean_element_block>();
                 break;
             case element_type_numeric:
                 m_current_cell.type = celltype_t::numeric;
-                m_current_cell.value.numeric = m_current_pos->get<numeric_element_block>();
+                m_current_cell.value = m_current_pos->get<numeric_element_block>();
                 break;
             case element_type_string:
                 m_current_cell.type = celltype_t::string;
-                m_current_cell.value.string = m_current_pos->get<string_element_block>();
+                m_current_cell.value = m_current_pos->get<string_element_block>();
                 break;
             case element_type_formula:
                 m_current_cell.type = celltype_t::formula;
-                m_current_cell.value.formula = m_current_pos->get<formula_element_block>();
+                m_current_cell.value = m_current_pos->get<formula_element_block>();
                 break;
             case element_type_empty:
                 m_current_cell.type = celltype_t::empty;
+                m_current_cell.value = false;
             default:
                 ;
         }
@@ -143,7 +115,7 @@ class iterator_core_horizontal : public model_iterator::impl
         m_update_current_cell = false;
     }
 public:
-    iterator_core_horizontal(const model_context& cxt, sheet_t sheet, const abs_rc_range_t& range) :
+    iterator_core_horizontal(const detail::model_context_impl& cxt, sheet_t sheet, const abs_rc_range_t& range) :
         m_update_current_cell(true)
     {
         const column_stores_t* cols = cxt.get_columns(sheet);
@@ -227,22 +199,23 @@ class iterator_core_vertical : public model_iterator::impl
         {
             case element_type_empty:
                 m_current_cell.type = celltype_t::empty;
+                m_current_cell.value = false;
                 break;
             case element_type_boolean:
                 m_current_cell.type = celltype_t::boolean;
-                m_current_cell.value.boolean = column_store_t::get<boolean_element_block>(m_current_pos);
+                m_current_cell.value = column_store_t::get<boolean_element_block>(m_current_pos);
                 break;
             case element_type_numeric:
                 m_current_cell.type = celltype_t::numeric;
-                m_current_cell.value.numeric = column_store_t::get<numeric_element_block>(m_current_pos);
+                m_current_cell.value = column_store_t::get<numeric_element_block>(m_current_pos);
                 break;
             case element_type_string:
                 m_current_cell.type = celltype_t::string;
-                m_current_cell.value.string = column_store_t::get<string_element_block>(m_current_pos);
+                m_current_cell.value = column_store_t::get<string_element_block>(m_current_pos);
                 break;
             case element_type_formula:
                 m_current_cell.type = celltype_t::formula;
-                m_current_cell.value.formula = column_store_t::get<formula_element_block>(m_current_pos);
+                m_current_cell.value = column_store_t::get<formula_element_block>(m_current_pos);
                 break;
             default:
                 throw std::logic_error("unhandled element type.");
@@ -254,7 +227,7 @@ class iterator_core_vertical : public model_iterator::impl
     }
 
 public:
-    iterator_core_vertical(const model_context& cxt, sheet_t sheet, const abs_rc_range_t& range) :
+    iterator_core_vertical(const detail::model_context_impl& cxt, sheet_t sheet, const abs_rc_range_t& range) :
         m_update_current_cell(true),
         m_row_first(0),
         m_row_last(row_unset)
@@ -360,16 +333,16 @@ public:
 
 } // anonymous namespace
 
-model_iterator::model_iterator() : mp_impl(ixion::make_unique<iterator_core_empty>()) {}
-model_iterator::model_iterator(const model_context& cxt, sheet_t sheet, const abs_rc_range_t& range, rc_direction_t dir)
+model_iterator::model_iterator() : mp_impl(std::make_unique<iterator_core_empty>()) {}
+model_iterator::model_iterator(const detail::model_context_impl& cxt, sheet_t sheet, const abs_rc_range_t& range, rc_direction_t dir)
 {
     switch (dir)
     {
         case rc_direction_t::horizontal:
-            mp_impl = ixion::make_unique<iterator_core_horizontal>(cxt, sheet, range);
+            mp_impl = std::make_unique<iterator_core_horizontal>(cxt, sheet, range);
             break;
         case rc_direction_t::vertical:
-            mp_impl = ixion::make_unique<iterator_core_vertical>(cxt, sheet, range);
+            mp_impl = std::make_unique<iterator_core_vertical>(cxt, sheet, range);
             break;
     }
 }
@@ -381,7 +354,7 @@ model_iterator::~model_iterator() {}
 model_iterator& model_iterator::operator= (model_iterator&& other)
 {
     mp_impl = std::move(other.mp_impl);
-    other.mp_impl = ixion::make_unique<iterator_core_empty>();
+    other.mp_impl = std::make_unique<iterator_core_empty>();
     return *this;
 }
 
@@ -407,18 +380,20 @@ std::ostream& operator<< (std::ostream& os, const model_iterator::cell& c)
     switch (c.type)
     {
         case celltype_t::boolean:
-            os << "; boolean=" << c.value.boolean;
+            os << "; boolean=" << std::get<bool>(c.value);
             break;
         case celltype_t::formula:
-            os << "; formula=" << c.value.formula;
+            os << "; formula=" << std::get<const formula_cell*>(c.value);
             break;
         case celltype_t::numeric:
-            os << "; numeric=" << c.value.numeric;
+            os << "; numeric=" << std::get<double>(c.value);
             break;
         case celltype_t::string:
-            os << "; string=" << c.value.string;
+            os << "; string=" << std::get<string_id_t>(c.value);
             break;
         case celltype_t::empty:
+            os << "; empty";
+            break;
         case celltype_t::unknown:
         default:
             ;

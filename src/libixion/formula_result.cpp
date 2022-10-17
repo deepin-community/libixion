@@ -6,16 +6,18 @@
  */
 
 #include "ixion/formula_result.hpp"
-#include "ixion/mem_str_buf.hpp"
 #include "ixion/exceptions.hpp"
 #include "ixion/interface/formula_model_access.hpp"
 #include "ixion/config.hpp"
 #include "ixion/matrix.hpp"
 
+#include "mem_str_buf.hpp"
+
 #include <cassert>
 #include <sstream>
 #include <iomanip>
 #include <ostream>
+#include <variant>
 
 #define DEBUG_FORMULA_RESULT 0
 
@@ -23,170 +25,109 @@
 #include <iostream>
 #endif
 
-using namespace std;
-
 namespace ixion {
 
 struct formula_result::impl
 {
-    result_type m_type;
+    using result_value_type = std::variant<double, formula_error_t, matrix, std::string>;
 
-    union
-    {
-        double m_value;
-        formula_error_t m_error;
-        matrix* m_matrix;
-        std::string* m_str;
-    };
+    result_type type;
+    result_value_type value;
 
-    impl() : m_type(result_type::value), m_value(0.0) {}
-    impl(double v) : m_type(result_type::value), m_value(v) {}
-    impl(std::string str) : m_type(result_type::string), m_str(new std::string(std::move(str))) {}
-    impl(formula_error_t e) : m_type(result_type::error), m_error(e) {}
-    impl(matrix mtx) : m_type(result_type::matrix), m_matrix(new matrix(std::move(mtx))) {}
-
-    impl(const impl& other) : m_type(other.m_type)
-    {
-        switch (m_type)
-        {
-            case result_type::value:
-                m_value = other.m_value;
-                break;
-            case result_type::string:
-                m_str = new std::string(*other.m_str);
-                break;
-            case result_type::error:
-                m_error = other.m_error;
-                break;
-            case result_type::matrix:
-                m_matrix = new matrix(*other.m_matrix);
-                break;
-            default:
-                assert(!"unknown formula result type specified during copy construction.");
-        }
-    }
-
-    ~impl()
-    {
-        delete_buffer();
-    }
-
-    void delete_buffer()
-    {
-        switch (m_type)
-        {
-            case result_type::matrix:
-                delete m_matrix;
-                break;
-            case result_type::string:
-                delete m_str;
-                break;
-            default:
-                ;
-        }
-    }
+    impl() : type(result_type::value), value(0.0) {}
+    impl(double v) : type(result_type::value), value(v) {}
+    impl(std::string str) : type(result_type::string), value(std::move(str)) {}
+    impl(formula_error_t e) : type(result_type::error), value(e) {}
+    impl(matrix mtx) : type(result_type::matrix), value(std::move(mtx)) {}
+    impl(const impl& other) : type(other.type), value(other.value) {}
 
     void reset()
     {
-        delete_buffer();
-        m_type = result_type::value;
-        m_value = 0.0;
+        type = result_type::value;
+        value = 0.0;
     }
 
     void set_value(double v)
     {
-        delete_buffer();
-        m_type = result_type::value;
-        m_value = v;
+        type = result_type::value;
+        value = v;
     }
 
     void set_string_value(std::string str)
     {
-        if (m_type == result_type::string)
-        {
-            *m_str = std::move(str);
-            return;
-        }
-
-        delete_buffer();
-        m_type = result_type::string;
-        m_str = new std::string(std::move(str));
+        type = result_type::string;
+        value = std::move(str);
     }
 
     void set_error(formula_error_t e)
     {
-        delete_buffer();
-        m_type = result_type::error;
-        m_error = e;
+        type = result_type::error;
+        value = e;
     }
 
     void set_matrix(matrix mtx)
     {
-        if (m_type == result_type::matrix)
-        {
-            *m_matrix = std::move(mtx);
-            return;
-        }
-
-        delete_buffer();
-        m_type = result_type::matrix;
-        m_matrix = new matrix(std::move(mtx));
+        type = result_type::matrix;
+        value = std::move(mtx);
     }
 
     double get_value() const
     {
-        assert(m_type == result_type::value);
-        return m_value;
+        assert(type == result_type::value);
+        return std::get<double>(value);
     }
 
     const std::string& get_string_value() const
     {
-        assert(m_type == result_type::string);
-        return *m_str;
+        assert(type == result_type::string);
+        return std::get<std::string>(value);
     }
 
     formula_error_t get_error() const
     {
-        assert(m_type == result_type::error);
-        return m_error;
+        assert(type == result_type::error);
+        return std::get<formula_error_t>(value);
     }
 
     const matrix& get_matrix() const
     {
-        assert(m_type == result_type::matrix);
-        return *m_matrix;
+        assert(type == result_type::matrix);
+        return std::get<matrix>(value);
     }
 
     matrix& get_matrix()
     {
-        assert(m_type == result_type::matrix);
-        return *m_matrix;
+        assert(type == result_type::matrix);
+        return std::get<matrix>(value);
     }
 
     result_type get_type() const
     {
-        return m_type;
+        return type;
     }
 
-    string str(const iface::formula_model_access& cxt) const
+    std::string str(const iface::formula_model_access& cxt) const
     {
-        switch (m_type)
+        switch (type)
         {
             case result_type::error:
-                return string(get_formula_error_name(m_error));
+            {
+                std::string_view s = get_formula_error_name(std::get<formula_error_t>(value));
+                return std::string(s);
+            }
             case result_type::string:
-                return *m_str;
+                return std::get<std::string>(value);
             case result_type::value:
             {
-                ostringstream os;
+                std::ostringstream os;
                 if (cxt.get_config().output_precision >= 0)
                     os << std::fixed << std::setprecision(cxt.get_config().output_precision);
-                os << m_value;
+                os << std::get<double>(value);
                 return os.str();
             }
             case result_type::matrix:
             {
-                const matrix& m = *m_matrix;
+                const matrix& m = std::get<matrix>(value);
 
                 std::ostringstream os;
 
@@ -208,22 +149,22 @@ struct formula_result::impl
                         {
                             case matrix::element_type::numeric:
                             {
-                                os << e.numeric;
+                                os << std::get<double>(e.value);
                                 break;
                             }
                             case matrix::element_type::string:
                             {
-                                os << '"' << *e.str << '"';
+                                os << '"' << std::get<std::string_view>(e.value) << '"';
                                 break;
                             }
                             case matrix::element_type::error:
                             {
-                                os << get_formula_error_name(e.error);
+                                os << get_formula_error_name(std::get<formula_error_t>(e.value));
                                 break;
                             }
                             case matrix::element_type::boolean:
                             {
-                                os << e.boolean;
+                                os << std::get<bool>(e.value);
                                 break;
                             }
                             default:
@@ -239,101 +180,64 @@ struct formula_result::impl
             default:
                 assert(!"unknown formula result type!");
         }
-        return string();
+        return std::string{};
     }
 
-    void parse(iface::formula_model_access& cxt, const char* p, size_t n)
+    void parse(std::string_view s)
     {
-        if (!n)
+        if (s.empty())
             return;
 
-        switch (*p)
+        switch (s[0])
         {
             case '#':
             {
-                parse_error(p, n);
+                parse_error(s);
                 break;
             }
             case '"':
             {
-                parse_string(cxt, p, n);
+                parse_string(s);
                 break;
             }
             case 't':
             case 'f':
             {
                 // parse this as a boolean value.
-                delete_buffer();
-                m_value = global::to_bool(p, n) ? 1.0 : 0.0;
-                m_type = result_type::value;
+                value = to_bool(s) ? 1.0 : 0.0;
+                type = result_type::value;
                 break;
             }
             default:
             {
                 // parse this as a number.
-                delete_buffer();
-                m_value = global::to_double(p, n);
-                m_type = result_type::value;
+                value = to_double(s);
+                type = result_type::value;
             }
         }
     }
 
     void move_from(formula_result&& r)
     {
-        delete_buffer();
-        m_type = r.mp_impl->m_type;
-
-        switch (m_type)
-        {
-            case result_type::value:
-                m_value = r.mp_impl->m_value;
-                break;
-            case result_type::string:
-                m_str = r.mp_impl->m_str;
-                r.mp_impl->m_str = nullptr;
-                break;
-            case result_type::error:
-                m_error = r.mp_impl->m_error;
-                break;
-            case result_type::matrix:
-                m_matrix = r.mp_impl->m_matrix;
-                r.mp_impl->m_matrix = nullptr;
-                break;
-            default:
-                assert(!"unknown formula result type specified during copy construction.");
-        }
+        type = r.mp_impl->type;
+        value = std::move(r.mp_impl->value);
     }
 
     bool equals(const formula_result& r) const
     {
-        if (m_type != r.mp_impl->m_type)
+        if (type != r.mp_impl->type)
             return false;
 
-        switch (m_type)
-        {
-            case result_type::value:
-                return m_value == r.mp_impl->m_value;
-            case result_type::string:
-                return *m_str == *r.mp_impl->m_str;
-            case result_type::error:
-                return m_error == r.mp_impl->m_error;
-            case result_type::matrix:
-                return *m_matrix == *r.mp_impl->m_matrix;
-            default:
-                assert(!"unknown formula result type specified during copy construction.");
-        }
-
-        assert(!"this should never be reached!");
-        return false;
+        return value == r.mp_impl->value;
     }
 
-    void parse_error(const char* p, size_t n)
+    void parse_error(std::string_view s)
     {
-        assert(n);
-        assert(*p == '#');
+        assert(!s.empty());
+        assert(s[0] == '#');
 
-        const char* p0 = p;
-        const char* p_end = p + n;
+        const char* p = s.data();
+        const char* p_end = p + s.size();
 
         ++p; // skip '#'.
         mem_str_buf buf;
@@ -353,13 +257,11 @@ struct formula_result::impl
 
                     if (buf.equals("REF"))
                     {
-                        delete_buffer();
-                        m_error = formula_error_t::ref_result_not_available;
+                        value = formula_error_t::ref_result_not_available;
                     }
                     else if (buf.equals("DIV/0"))
                     {
-                        delete_buffer();
-                        m_error = formula_error_t::division_by_zero;
+                        value = formula_error_t::division_by_zero;
                     }
                     else
                     {
@@ -367,7 +269,7 @@ struct formula_result::impl
                         break;
                     }
 
-                    m_type = result_type::error;
+                    type = result_type::error;
                     return;
                 }
                 case '?':
@@ -380,8 +282,7 @@ struct formula_result::impl
 
                     if (buf.equals("NAME"))
                     {
-                        delete_buffer();
-                        m_error = formula_error_t::name_not_found;
+                        value = formula_error_t::name_not_found;
                     }
                     else
                     {
@@ -389,7 +290,7 @@ struct formula_result::impl
                         break;
                     }
 
-                    m_type = result_type::error;
+                    type = result_type::error;
                     return;
                 }
             }
@@ -404,21 +305,22 @@ struct formula_result::impl
                 buf.inc();
         }
 
-        ostringstream os;
-        os << "malformed error string: " << string(p0, n);
+        std::ostringstream os;
+        os << "malformed error string: " << s;
         throw general_error(os.str());
     }
 
-    void parse_string(iface::formula_model_access& cxt, const char* p, size_t n)
+    void parse_string(std::string_view s)
     {
-        if (n <= 1)
+        if (s.size() <= 1u)
             return;
 
-        assert(*p == '"');
+        assert(s[0] == '"');
+        const char* p = s.data();
         ++p;
         const char* p_first = p;
-        size_t len = 0;
-        for (size_t i = 1; i < n; ++i, ++len, ++p)
+        std::size_t len = 0;
+        for (std::size_t i = 1; i < s.size(); ++i, ++len, ++p)
         {
             char c = *p;
             if (c == '"')
@@ -428,27 +330,26 @@ struct formula_result::impl
         if (!len)
             throw general_error("failed to parse string result.");
 
-        delete_buffer();
-        m_type = result_type::string;
-        m_str = new std::string(p_first, len);
+        type = result_type::string;
+        value = std::string(p_first, len);
     }
 };
 
 formula_result::formula_result() :
-    mp_impl(ixion::make_unique<impl>()) {}
+    mp_impl(std::make_unique<impl>()) {}
 
 formula_result::formula_result(const formula_result& r) :
-    mp_impl(ixion::make_unique<impl>(*r.mp_impl)) {}
+    mp_impl(std::make_unique<impl>(*r.mp_impl)) {}
 
 formula_result::formula_result(formula_result&& r) : mp_impl(std::move(r.mp_impl)) {}
 
-formula_result::formula_result(double v) : mp_impl(ixion::make_unique<impl>(v)) {}
+formula_result::formula_result(double v) : mp_impl(std::make_unique<impl>(v)) {}
 
-formula_result::formula_result(std::string str) : mp_impl(ixion::make_unique<impl>(std::move(str))) {}
+formula_result::formula_result(std::string str) : mp_impl(std::make_unique<impl>(std::move(str))) {}
 
-formula_result::formula_result(formula_error_t e) : mp_impl(ixion::make_unique<impl>(e)) {}
+formula_result::formula_result(formula_error_t e) : mp_impl(std::make_unique<impl>(e)) {}
 
-formula_result::formula_result(matrix mtx) : mp_impl(ixion::make_unique<impl>(std::move(mtx))) {}
+formula_result::formula_result(matrix mtx) : mp_impl(std::make_unique<impl>(std::move(mtx))) {}
 
 formula_result::~formula_result() {}
 
@@ -507,14 +408,14 @@ formula_result::result_type formula_result::get_type() const
     return mp_impl->get_type();
 }
 
-string formula_result::str(const iface::formula_model_access& cxt) const
+std::string formula_result::str(const iface::formula_model_access& cxt) const
 {
     return mp_impl->str(cxt);
 }
 
-void formula_result::parse(iface::formula_model_access& cxt, const char* p, size_t n)
+void formula_result::parse(std::string_view s)
 {
-    mp_impl->parse(cxt, p, n);
+    mp_impl->parse(s);
 }
 
 formula_result& formula_result::operator= (formula_result r)

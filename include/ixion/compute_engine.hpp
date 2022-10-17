@@ -8,11 +8,29 @@
 #ifndef INCLUDED_IXION_COMPUTE_ENGINE_HPP
 #define INCLUDED_IXION_COMPUTE_ENGINE_HPP
 
-#include "ixion/env.hpp"
-#include "ixion/module.hpp"
+#include "env.hpp"
+#include "module.hpp"
+
 #include <memory>
+#include <string>
 
 namespace ixion { namespace draft {
+
+enum class array_type { unknown, float32, float64, uint32 };
+
+struct array
+{
+    union
+    {
+        float* float32;
+        double* float64;
+        uint32_t* uint32;
+        void* data;
+    };
+
+    array_type type = array_type::unknown;
+    std::size_t size = 0u;
+};
 
 /**
  * Default compute engine class that uses CPU for all its computations.
@@ -33,13 +51,14 @@ public:
     /**
      * Create a compute engine instance.
      *
-     * @param name name of the compute engine, or nullptr for the default one.
+     * @param name name of the compute engine, or an empty name for the default
+     *             one.
      *
      * @return compute engine instance associted with the specified name. Note
      *         that if no compute engine is registered with the specified
      *         name, the default one is created.
      */
-    static std::shared_ptr<compute_engine> create(const char* name = nullptr);
+    static std::shared_ptr<compute_engine> create(std::string_view name = std::string_view());
 
     /**
      * Add a new compute engine class.
@@ -53,12 +72,14 @@ public:
      *                     compute engine class.
      */
     static void add_class(
-        void* hdl, const char* name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy);
+        void* hdl, std::string_view name, create_compute_engine_t func_create, destroy_compute_engine_t func_destroy);
 
     compute_engine();
     virtual ~compute_engine();
 
-    virtual const char* get_name() const;
+    virtual std::string_view get_name() const;
+
+    virtual void compute_fibonacci(array& io);
 };
 
 }}

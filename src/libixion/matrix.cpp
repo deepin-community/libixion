@@ -7,6 +7,7 @@
 
 #include "ixion/matrix.hpp"
 #include "ixion/global.hpp"
+#include "column_store_type.hpp"
 
 #include <limits>
 #include <cstring>
@@ -63,25 +64,25 @@ struct numeric_matrix::impl
 };
 
 matrix::matrix() :
-    mp_impl(ixion::make_unique<impl>()) {}
+    mp_impl(std::make_unique<impl>()) {}
 
 matrix::matrix(size_t rows, size_t cols) :
-    mp_impl(ixion::make_unique<impl>(rows, cols)) {}
+    mp_impl(std::make_unique<impl>(rows, cols)) {}
 
 matrix::matrix(size_t rows, size_t cols, double numeric) :
-    mp_impl(ixion::make_unique<impl>(rows, cols, numeric)) {}
+    mp_impl(std::make_unique<impl>(rows, cols, numeric)) {}
 
 matrix::matrix(size_t rows, size_t cols, bool boolean) :
-    mp_impl(ixion::make_unique<impl>(rows, cols, boolean)) {}
+    mp_impl(std::make_unique<impl>(rows, cols, boolean)) {}
 
 matrix::matrix(size_t rows, size_t cols, const std::string& str) :
-    mp_impl(ixion::make_unique<impl>(rows, cols, str)) {}
+    mp_impl(std::make_unique<impl>(rows, cols, str)) {}
 
 matrix::matrix(size_t rows, size_t cols, formula_error_t error) :
-    mp_impl(ixion::make_unique<impl>(rows, cols, error)) {}
+    mp_impl(std::make_unique<impl>(rows, cols, error)) {}
 
 matrix::matrix(const matrix& other) :
-    mp_impl(ixion::make_unique<impl>(*other.mp_impl))
+    mp_impl(std::make_unique<impl>(*other.mp_impl))
 {
 }
 
@@ -91,7 +92,7 @@ matrix::matrix(matrix&& other) :
 }
 
 matrix::matrix(const numeric_matrix& other) :
-    mp_impl(ixion::make_unique<impl>(
+    mp_impl(std::make_unique<impl>(
         other.mp_impl->m_array, other.row_size(), other.col_size()))
 {
 }
@@ -159,7 +160,7 @@ matrix::element matrix::get(size_t row, size_t col) const
     {
         case mdds::mtm::element_numeric:
             me.type = element_type::numeric;
-            me.numeric = mp_impl->m_data.get_numeric(row, col);
+            me.value = mp_impl->m_data.get_numeric(row, col);
             break;
         case mdds::mtm::element_integer:
         {
@@ -169,18 +170,21 @@ matrix::element matrix::get(size_t row, size_t col) const
                 break;
 
             me.type = element_type::error;
-            me.error = static_cast<formula_error_t>(-v);
+            me.value = static_cast<formula_error_t>(-v);
             break;
         }
         case mdds::mtm::element_string:
         {
             me.type = element_type::string;
-            me.str = &mp_impl->m_data.get_string(row, col);
+            me.value = mp_impl->m_data.get_string(row, col);
             break;
         }
         case mdds::mtm::element_boolean:
+        {
             me.type = element_type::boolean;
-            me.boolean = mp_impl->m_data.get_boolean(row, col);
+            me.value = mp_impl->m_data.get_boolean(row, col);
+            break;
+        }
         default:
             ;
     }
@@ -271,11 +275,11 @@ bool matrix::operator!= (const matrix& r) const
     return !operator==(r);
 }
 
-numeric_matrix::numeric_matrix() : mp_impl(ixion::make_unique<impl>()) {}
+numeric_matrix::numeric_matrix() : mp_impl(std::make_unique<impl>()) {}
 numeric_matrix::numeric_matrix(size_t rows, size_t cols) :
-    mp_impl(ixion::make_unique<impl>(rows, cols)) {}
+    mp_impl(std::make_unique<impl>(rows, cols)) {}
 numeric_matrix::numeric_matrix(std::vector<double> array, size_t rows, size_t cols) :
-    mp_impl(ixion::make_unique<impl>(std::move(array), rows, cols)) {}
+    mp_impl(std::make_unique<impl>(std::move(array), rows, cols)) {}
 
 numeric_matrix::numeric_matrix(numeric_matrix&& r) : mp_impl(std::move(r.mp_impl)) {}
 

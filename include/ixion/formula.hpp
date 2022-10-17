@@ -8,9 +8,9 @@
 #ifndef INCLUDED_IXION_FORMULA_HPP
 #define INCLUDED_IXION_FORMULA_HPP
 
-#include "ixion/formula_tokens.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/env.hpp"
+#include "formula_tokens.hpp"
+#include "./interface/formula_model_access.hpp"
+#include "env.hpp"
 
 #include <string>
 
@@ -24,34 +24,29 @@ class formula_name_resolver;
  * @param cxt model context.
  * @param pos address of the cell that has the formula expression.
  * @param resolver name resolver object used to resolve name tokens.
- * @param p pointer to the first character of raw formula expression string.
- * @param n size of the raw formula expression string.
+ * @param formula raw formula expression string to parse.
  *
  * @return formula tokens representing the parsed formula expression.
  */
 IXION_DLLPUBLIC formula_tokens_t parse_formula_string(
     iface::formula_model_access& cxt, const abs_address_t& pos,
-    const formula_name_resolver& resolver, const char* p, size_t n);
+    const formula_name_resolver& resolver, std::string_view formula);
 
 /**
  * Create a set of tokens that represent an invalid formula.
  *
  * @param cxt model context.
- * @param p_src_formula pointer to the buffer containing the original
- *                      formula string.
- * @param n_src_formula length of the buffer containinig the original
- *                      formula string.
- * @param p_error pointer to the buffer containing the error string.
- * @param n_error length of the buffer containing the erorr string.
+ * @param src_formula original formula string.
+ * @param error error string.
  *
- * @return a set of tokens, the first of which is a token of type {@link
- *         fop_error}, followed by two string tokens.  The first string
- *         token stores original formula string, whereas the second one
- *         stores the error string.
+ * @return a set of tokens, the first of which is a token of type fop_error,
+ *         followed by two string tokens.  The first string token stores
+ *         original formula string, whereas the second one stores the error
+ *         string.
  */
 IXION_DLLPUBLIC formula_tokens_t create_formula_error_tokens(
-    iface::formula_model_access& cxt, const char* p_src_formula, size_t n_src_formula,
-    const char* p_error, size_t n_error);
+    iface::formula_model_access& cxt, std::string_view src_formula,
+    std::string_view error);
 
 /**
  * Convert formula tokens into a human-readable string representation.
@@ -132,9 +127,9 @@ IXION_DLLPUBLIC abs_address_set_t query_dirty_cells(
  * that if the model contains volatile formula cells, they will be included
  * in the returned sequence each and every time.
  *
- * Use {@link ixion::query_dirty_cells} instead if you don't need the
- * results to be sorted in order of dependency, to avoid the extra overhead
- * incurred by the sorting.
+ * Use query_dirty_cells() instead if you don't need the results to be sorted
+ * in order of dependency, to avoid the extra overhead incurred by the
+ * sorting.
  *
  * @param cxt model context.
  * @param modified_cells a collection of non-formula cells whose values have
@@ -166,8 +161,7 @@ IXION_DLLPUBLIC std::vector<abs_range_t> query_and_sort_dirty_cells(
  * @param formula_cells formula cells to be calculated.  The cells will be
  *                      calculated in the order they appear in the sequence.
  *                      In a typical use case, this will be the returned
- *                      value from {@link
- *                      ixion::query_and_sort_dirty_cells}.
+ *                      value from query_and_sort_dirty_cells.
  * @param thread_count number of calculation threads to use.  Note that
  *                     passing 0 will make the process use the main thread
  *                     only, while passing any number greater than 0 will

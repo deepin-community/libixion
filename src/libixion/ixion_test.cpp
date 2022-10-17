@@ -16,6 +16,7 @@
 #include "ixion/interface/table_handler.hpp"
 #include "ixion/config.hpp"
 #include "ixion/matrix.hpp"
+#include "ixion/cell.hpp"
 #include "ixion/cell_access.hpp"
 #include "ixion/formula_result.hpp"
 
@@ -61,7 +62,7 @@ void test_string_to_double()
     size_t n = sizeof(tests) / sizeof(tests[0]);
     for (size_t i = 0; i < n; ++i)
     {
-        double v = global::to_double(tests[i].s, strlen(tests[i].s));
+        double v = to_double(tests[i].s);
         assert(v == tests[i].v);
     }
 }
@@ -71,18 +72,18 @@ void test_string_pool()
     cout << "test string pool" << endl;
     model_context cxt;
 
-    string_id_t s_table1 = cxt.append_string(IXION_ASCII("Table1"));
-    string_id_t s_table2 = cxt.append_string(IXION_ASCII("Table2"));
-    string_id_t s_cat = cxt.append_string(IXION_ASCII("Category"));
-    string_id_t s_val = cxt.append_string(IXION_ASCII("Value"));
+    string_id_t s_table1 = cxt.append_string("Table1");
+    string_id_t s_table2 = cxt.append_string("Table2");
+    string_id_t s_cat = cxt.append_string("Category");
+    string_id_t s_val = cxt.append_string("Value");
 
     cxt.dump_strings();
 
     // Make sure these work correctly before proceeding further with the test.
-    assert(s_table1 == cxt.get_identifier_from_string(IXION_ASCII("Table1")));
-    assert(s_table2 == cxt.get_identifier_from_string(IXION_ASCII("Table2")));
-    assert(s_cat == cxt.get_identifier_from_string(IXION_ASCII("Category")));
-    assert(s_val == cxt.get_identifier_from_string(IXION_ASCII("Value")));
+    assert(s_table1 == cxt.get_identifier_from_string("Table1"));
+    assert(s_table2 == cxt.get_identifier_from_string("Table2"));
+    assert(s_cat == cxt.get_identifier_from_string("Category"));
+    assert(s_val == cxt.get_identifier_from_string("Value"));
 }
 
 void test_formula_tokens_store()
@@ -140,7 +141,7 @@ void test_matrix()
     {
         matrix::element e = mtx.get(c.row, c.col);
         assert(e.type == matrix::element_type::numeric);
-        assert(e.numeric == c.val);
+        assert(std::get<double>(e.value) == c.val);
     }
 }
 
@@ -156,15 +157,15 @@ void test_matrix_non_numeric_values()
 
     matrix::element elem = mtx.get(1, 0);
     assert(elem.type == matrix::element_type::error);
-    assert(elem.error == formula_error_t::division_by_zero);
+    assert(std::get<formula_error_t>(elem.value) == formula_error_t::division_by_zero);
 
     elem = mtx.get(0, 1);
     assert(elem.type == matrix::element_type::string);
-    assert(*elem.str == "foo");
+    assert(std::get<std::string_view>(elem.value) == "foo");
 
     elem = mtx.get(1, 1);
     assert(elem.type == matrix::element_type::boolean);
-    assert(elem.boolean == true);
+    assert(std::get<bool>(elem.value) == true);
 }
 
 struct ref_name_entry
@@ -178,10 +179,10 @@ void test_name_resolver_calc_a1()
     cout << "test name resolver calc a1" << endl;
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("One"));
-    cxt.append_sheet(IXION_ASCII("Two"));
-    cxt.append_sheet(IXION_ASCII("Three"));
-    cxt.append_sheet(IXION_ASCII("A B C")); // name with space
+    cxt.append_sheet("One");
+    cxt.append_sheet("Two");
+    cxt.append_sheet("Three");
+    cxt.append_sheet("A B C"); // name with space
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::calc_a1, &cxt);
     assert(resolver);
 
@@ -222,14 +223,14 @@ void test_name_resolver_calc_a1()
             const char* p = names[i].name;
             string name_a1(p);
             cout << "single cell address: " << name_a1 << endl;
-            formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+            formula_name_t res = resolver->resolve(name_a1, abs_address_t());
             if (res.type != formula_name_t::cell_reference)
             {
                 cerr << "failed to resolve cell address: " << name_a1 << endl;
                 assert(false);
             }
 
-            address_t addr = to_address(res.address);
+            address_t addr = std::get<address_t>(res.value);
             string test_name = resolver->get_name(addr, abs_address_t(), names[i].sheet_name);
 
             if (name_a1 != test_name)
@@ -267,15 +268,15 @@ void test_name_resolver_calc_a1()
                 abs_address_t pos{sheet, 0, 0};
                 string name_a1(names[i].name);
                 cout << "range address: " << name_a1 << endl;
-                formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), pos);
+                formula_name_t res = resolver->resolve(name_a1, pos);
                 if (res.type != formula_name_t::range_reference)
                 {
                     cerr << "failed to resolve range address: " << name_a1 << endl;
                     assert(false);
                 }
 
-                range_t range = to_range(res.range);
-                std::string test_name = resolver->get_name(range, pos, names[i].sheet_name);
+                std::string test_name = resolver->get_name(
+                    std::get<range_t>(res.value), pos, names[i].sheet_name);
 
                 if (name_a1 != test_name)
                 {
@@ -301,65 +302,70 @@ void test_name_resolver_calc_a1()
     {
         string name_a1(range_tests[i].name);
         cout << "range address: " << name_a1 << endl;
-        formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
+        auto range = std::get<range_t>(res.value);
         assert(res.type == formula_name_t::range_reference);
-        assert(res.range.first.sheet == range_tests[i].sheet1);
-        assert(res.range.first.row == range_tests[i].row1);
-        assert(res.range.first.col == range_tests[i].col1);
-        assert(res.range.last.sheet == range_tests[i].sheet2);
-        assert(res.range.last.row == range_tests[i].row2);
-        assert(res.range.last.col == range_tests[i].col2);
+        assert(range.first.sheet == range_tests[i].sheet1);
+        assert(range.first.row == range_tests[i].row1);
+        assert(range.first.column == range_tests[i].col1);
+        assert(range.last.sheet == range_tests[i].sheet2);
+        assert(range.last.row == range_tests[i].row2);
+        assert(range.last.column == range_tests[i].col2);
     }
 
     {
-        formula_name_t res = resolver->resolve("B1", 2, abs_address_t(0,1,1));
+        formula_name_t res = resolver->resolve("B1", abs_address_t(0,1,1));
+        auto addr = std::get<address_t>(res.value);
         assert(res.type == formula_name_t::cell_reference);
-        assert(res.address.sheet == 0);
-        assert(res.address.row == -1);
-        assert(res.address.col == 0);
+        assert(addr.sheet == 0);
+        assert(addr.row == -1);
+        assert(addr.column == 0);
     }
 
     {
-        formula_name_t res = resolver->resolve("B2:B4", 5, abs_address_t(0,0,3));
+        formula_name_t res = resolver->resolve("B2:B4", abs_address_t(0,0,3));
+        auto range = std::get<range_t>(res.value);
         assert(res.type == formula_name_t::range_reference);
-        assert(res.range.first.sheet == 0);
-        assert(res.range.first.row == 1);
-        assert(res.range.first.col == -2);
-        assert(res.range.last.sheet == 0);
-        assert(res.range.last.row == 3);
-        assert(res.range.last.col == -2);
+        assert(range.first.sheet == 0);
+        assert(range.first.row == 1);
+        assert(range.first.column == -2);
+        assert(range.last.sheet == 0);
+        assert(range.last.row == 3);
+        assert(range.last.column == -2);
     }
 
     {
-        formula_name_t res = resolver->resolve(IXION_ASCII("Three.B2"), abs_address_t(2,0,0));
+        formula_name_t res = resolver->resolve("Three.B2", abs_address_t(2,0,0));
+        auto addr = std::get<address_t>(res.value);
         assert(res.type == formula_name_t::cell_reference);
-        assert(!res.address.abs_sheet);
-        assert(!res.address.abs_row);
-        assert(!res.address.abs_col);
-        assert(res.address.sheet == 0);
-        assert(res.address.row == 1);
-        assert(res.address.col == 1);
+        assert(!addr.abs_sheet);
+        assert(!addr.abs_row);
+        assert(!addr.abs_column);
+        assert(addr.sheet == 0);
+        assert(addr.row == 1);
+        assert(addr.column == 1);
     }
 
     {
         abs_address_t pos(2, 0, 0);
         std::string name("One.B2:Three.C4");
-        formula_name_t res = resolver->resolve(name.data(), name.size(), pos);
+        formula_name_t res = resolver->resolve(name, pos);
+        auto range = std::get<range_t>(res.value);
         assert(res.type == formula_name_t::range_reference);
-        assert(!res.range.first.abs_sheet);
-        assert(!res.range.first.abs_row);
-        assert(!res.range.first.abs_col);
-        assert(res.range.first.sheet == -2);
-        assert(res.range.first.row == 1);
-        assert(res.range.first.col == 1);
-        assert(!res.range.last.abs_sheet);
-        assert(!res.range.last.abs_row);
-        assert(!res.range.last.abs_col);
-        assert(res.range.last.sheet == 0);
-        assert(res.range.last.row == 3);
-        assert(res.range.last.col == 2);
+        assert(!range.first.abs_sheet);
+        assert(!range.first.abs_row);
+        assert(!range.first.abs_column);
+        assert(range.first.sheet == -2);
+        assert(range.first.row == 1);
+        assert(range.first.column == 1);
+        assert(!range.last.abs_sheet);
+        assert(!range.last.abs_row);
+        assert(!range.last.abs_column);
+        assert(range.last.sheet == 0);
+        assert(range.last.row == 3);
+        assert(range.last.column == 2);
 
-        std::string s = resolver->get_name(to_range(res.range), pos, true);
+        std::string s = resolver->get_name(range, pos, true);
         assert(s == name);
     }
 }
@@ -369,11 +375,11 @@ void test_name_resolver_excel_a1()
     cout << "test name resolver excel a1" << endl;
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("One"));
-    cxt.append_sheet(IXION_ASCII("Two"));
-    cxt.append_sheet(IXION_ASCII("Three"));
-    cxt.append_sheet(IXION_ASCII("A B C")); // name with space
-    cxt.append_sheet(IXION_ASCII("'quote'")); // quoted name
+    cxt.append_sheet("One");
+    cxt.append_sheet("Two");
+    cxt.append_sheet("Three");
+    cxt.append_sheet("A B C"); // name with space
+    cxt.append_sheet("'quote'"); // quoted name
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     assert(resolver);
 
@@ -412,14 +418,14 @@ void test_name_resolver_excel_a1()
         {
             const char* p = names[i].name;
             string name_a1(p);
-            formula_name_t res = resolver->resolve(&name_a1[0], name_a1.size(), abs_address_t());
+            formula_name_t res = resolver->resolve(name_a1, abs_address_t());
             if (res.type != formula_name_t::cell_reference)
             {
                 cerr << "failed to resolve cell address: " << name_a1 << endl;
                 assert(false);
             }
 
-            address_t addr = to_address(res.address);
+            address_t addr = std::get<address_t>(res.value);
             string test_name = resolver->get_name(addr, abs_address_t(), names[i].sheet_name);
 
             if (name_a1 != test_name)
@@ -449,14 +455,14 @@ void test_name_resolver_excel_a1()
             const char* p = names[i].name;
             string name_a1(p);
             cout << "range address: " << name_a1 << endl;
-            formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+            formula_name_t res = resolver->resolve(name_a1, abs_address_t());
             if (res.type != formula_name_t::range_reference)
             {
                 cerr << "failed to resolve range address: " << name_a1 << endl;
                 assert(false);
             }
 
-            range_t range = to_range(res.range);
+            range_t range = std::get<range_t>(res.value);
             std::string test_name = resolver->get_name(range, abs_address_t(), names[i].sheet_name);
 
             if (name_a1 != test_name)
@@ -482,33 +488,36 @@ void test_name_resolver_excel_a1()
     for (size_t i = 0; range_tests[i].name; ++i)
     {
         string name_a1(range_tests[i].name);
-        formula_name_t res = resolver->resolve(&name_a1[0], name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
+        auto range = std::get<range_t>(res.value);
         assert(res.type == formula_name_t::range_reference);
-        assert(res.range.first.sheet == range_tests[i].sheet1);
-        assert(res.range.first.row == range_tests[i].row1);
-        assert(res.range.first.col == range_tests[i].col1);
-        assert(res.range.last.sheet == range_tests[i].sheet2);
-        assert(res.range.last.row == range_tests[i].row2);
-        assert(res.range.last.col == range_tests[i].col2);
+        assert(range.first.sheet == range_tests[i].sheet1);
+        assert(range.first.row == range_tests[i].row1);
+        assert(range.first.column == range_tests[i].col1);
+        assert(range.last.sheet == range_tests[i].sheet2);
+        assert(range.last.row == range_tests[i].row2);
+        assert(range.last.column == range_tests[i].col2);
     }
 
     {
-        formula_name_t res = resolver->resolve("B1", 2, abs_address_t(0,1,1));
+        formula_name_t res = resolver->resolve("B1", abs_address_t(0,1,1));
+        auto addr = std::get<address_t>(res.value);
         assert(res.type == formula_name_t::cell_reference);
-        assert(res.address.sheet == 0);
-        assert(res.address.row == -1);
-        assert(res.address.col == 0);
+        assert(addr.sheet == 0);
+        assert(addr.row == -1);
+        assert(addr.column == 0);
     }
 
     {
-        formula_name_t res = resolver->resolve("B2:B4", 5, abs_address_t(0,0,3));
+        formula_name_t res = resolver->resolve("B2:B4", abs_address_t(0,0,3));
+        auto range = std::get<range_t>(res.value);
         assert(res.type == formula_name_t::range_reference);
-        assert(res.range.first.sheet == 0);
-        assert(res.range.first.row == 1);
-        assert(res.range.first.col == -2);
-        assert(res.range.last.sheet == 0);
-        assert(res.range.last.row == 3);
-        assert(res.range.last.col == -2);
+        assert(range.first.sheet == 0);
+        assert(range.first.row == 1);
+        assert(range.first.column == -2);
+        assert(range.last.sheet == 0);
+        assert(range.last.row == 3);
+        assert(range.last.column == -2);
     }
 
     // Parse name without row index.
@@ -525,13 +534,13 @@ void test_name_resolver_excel_a1()
     for (size_t i = 0; name_tests[i].name; ++i)
     {
         string name_a1(name_tests[i].name);
-        formula_name_t res = resolver->resolve(&name_a1[0], name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
         assert(res.type == name_tests[i].type);
     }
 
     {
         // Parse address with non-existing sheet name.  It should be flagged invalid.
-        formula_name_t res = resolver->resolve(IXION_ASCII("NotExists!A1"), abs_address_t());
+        formula_name_t res = resolver->resolve("NotExists!A1", abs_address_t());
         assert(res.type == formula_name_t::invalid);
     }
 }
@@ -541,7 +550,7 @@ void test_name_resolver_named_expression()
     cout << "Testing the name resolvers for parsing named expressions." << endl;
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("Sheet"));
+    cxt.append_sheet("Sheet");
 
     const std::vector<formula_name_resolver_t> resolver_types = {
         formula_name_resolver_t::excel_a1,
@@ -564,7 +573,7 @@ void test_name_resolver_named_expression()
         for (const std::string& name : names)
         {
             cout << "parsing '" << name << "'..." << endl;
-            formula_name_t res = resolver->resolve(name.data(), name.size(), abs_address_t(0,0,0));
+            formula_name_t res = resolver->resolve(name, abs_address_t(0,0,0));
             assert(res.type == formula_name_t::name_type::named_expression);
         }
     }
@@ -574,17 +583,17 @@ void test_name_resolver_table_excel_a1()
 {
     cout << "Testing the Excel A1 name resolver for parsing table references." << endl;
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("Sheet"));
-    string_id_t s_table1 = cxt.append_string(IXION_ASCII("Table1"));
-    string_id_t s_table2 = cxt.append_string(IXION_ASCII("Table2"));
-    string_id_t s_cat = cxt.append_string(IXION_ASCII("Category"));
-    string_id_t s_val = cxt.append_string(IXION_ASCII("Value"));
+    cxt.append_sheet("Sheet");
+    string_id_t s_table1 = cxt.append_string("Table1");
+    string_id_t s_table2 = cxt.append_string("Table2");
+    string_id_t s_cat = cxt.append_string("Category");
+    string_id_t s_val = cxt.append_string("Value");
 
     // Make sure these work correctly before proceeding further with the test.
-    assert(s_table1 == cxt.get_identifier_from_string(IXION_ASCII("Table1")));
-    assert(s_table2 == cxt.get_identifier_from_string(IXION_ASCII("Table2")));
-    assert(s_cat == cxt.get_identifier_from_string(IXION_ASCII("Category")));
-    assert(s_val == cxt.get_identifier_from_string(IXION_ASCII("Value")));
+    assert(s_table1 == cxt.get_identifier_from_string("Table1"));
+    assert(s_table2 == cxt.get_identifier_from_string("Table2"));
+    assert(s_cat == cxt.get_identifier_from_string("Category"));
+    assert(s_val == cxt.get_identifier_from_string("Value"));
 
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     assert(resolver);
@@ -621,14 +630,14 @@ void test_name_resolver_table_excel_a1()
     {
         cout << "* table reference: " << tests[i].exp << endl;
         abs_address_t pos(tests[i].sheet, tests[i].row, tests[i].col);
-        formula_name_t res = resolver->resolve(tests[i].exp, tests[i].len, pos);
+        formula_name_t res = resolver->resolve({tests[i].exp, tests[i].len}, pos);
         if (res.type != formula_name_t::table_reference)
             assert(!"table reference expected.");
 
-        formula_name_t::table_type table = res.table;
-        string_id_t table_name = cxt.get_identifier_from_string(table.name, table.name_length);
-        string_id_t column_first = cxt.get_identifier_from_string(table.column_first, table.column_first_length);
-        string_id_t column_last = cxt.get_identifier_from_string(table.column_last, table.column_last_length);
+        auto table = std::get<formula_name_t::table_type>(res.value);
+        string_id_t table_name = cxt.get_identifier_from_string(table.name);
+        string_id_t column_first = cxt.get_identifier_from_string(table.column_first);
+        string_id_t column_last = cxt.get_identifier_from_string(table.column_last);
         assert(table_name == tests[i].table_name);
         assert(column_first == tests[i].column_first);
         assert(column_last == tests[i].column_last);
@@ -652,10 +661,10 @@ void test_name_resolver_excel_r1c1()
 {
     cout << "test name resolver excel r1c1" << endl;
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("One"));
-    cxt.append_sheet(IXION_ASCII("Two"));
-    cxt.append_sheet(IXION_ASCII("A B C")); // name with space
-    cxt.append_sheet(IXION_ASCII("80's Music"));
+    cxt.append_sheet("One");
+    cxt.append_sheet("Two");
+    cxt.append_sheet("A B C"); // name with space
+    cxt.append_sheet("80's Music");
 
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_r1c1, &cxt);
     assert(resolver);
@@ -686,14 +695,14 @@ void test_name_resolver_excel_r1c1()
         const char* p = single_ref_names[i].name;
         string name_r1c1(p);
         cout << "Parsing " << name_r1c1 << endl;
-        formula_name_t res = resolver->resolve(name_r1c1.data(), name_r1c1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_r1c1, abs_address_t());
         if (res.type != formula_name_t::cell_reference)
         {
             cerr << "failed to resolve cell address: " << name_r1c1 << endl;
             assert(false);
         }
 
-        address_t addr = to_address(res.address);
+        address_t addr = std::get<address_t>(res.value);
         string test_name = resolver->get_name(addr, abs_address_t(), single_ref_names[i].sheet_name);
 
         if (name_r1c1 != test_name)
@@ -727,7 +736,7 @@ void test_name_resolver_excel_r1c1()
     {
         const char* p = invalid_address[i];
         string name_r1c1(p);
-        formula_name_t res = resolver->resolve(name_r1c1.data(), name_r1c1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_r1c1, abs_address_t());
         if (res.type != formula_name_t::invalid && res.type != formula_name_t::named_expression)
         {
             cerr << "address " << name_r1c1 << " is expected to be invalid." << endl;
@@ -747,7 +756,7 @@ void test_name_resolver_excel_r1c1()
     {
         const char* p = valid_address[i];
         string name_r1c1(p);
-        formula_name_t res = resolver->resolve(name_r1c1.data(), name_r1c1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_r1c1, abs_address_t());
         if (res.type != formula_name_t::cell_reference)
         {
             cerr << "address " << name_r1c1 << " is expected to be valid." << endl;
@@ -786,29 +795,29 @@ void test_name_resolver_excel_r1c1()
     {
         string name_r1c1(range_tests[i].name);
         cout << "Parsing " << name_r1c1 << endl;
-        formula_name_t res = resolver->resolve(&name_r1c1[0], name_r1c1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_r1c1, abs_address_t());
+        auto range = std::get<range_t>(res.value);
 
         assert(res.type == formula_name_t::range_reference);
-
-        assert(res.range.first.sheet == range_tests[i].sheet1);
-        assert(res.range.first.row == range_tests[i].row1);
-        assert(res.range.first.col == range_tests[i].col1);
-        assert(res.range.first.abs_sheet == range_tests[i].abs_sheet1);
-        if (res.range.first.row != row_unset)
+        assert(range.first.sheet == range_tests[i].sheet1);
+        assert(range.first.row == range_tests[i].row1);
+        assert(range.first.column == range_tests[i].col1);
+        assert(range.first.abs_sheet == range_tests[i].abs_sheet1);
+        if (range.first.row != row_unset)
             // When row is unset, whether it's relative or absolute is not relevant.
-            assert(res.range.first.abs_row == range_tests[i].abs_row1);
-        if (res.range.first.col != column_unset)
+            assert(range.first.abs_row == range_tests[i].abs_row1);
+        if (range.first.column != column_unset)
             // Same with unset column.
-            assert(res.range.first.abs_col == range_tests[i].abs_col1);
+            assert(range.first.abs_column == range_tests[i].abs_col1);
 
-        assert(res.range.last.sheet == range_tests[i].sheet2);
-        assert(res.range.last.row == range_tests[i].row2);
-        assert(res.range.last.col == range_tests[i].col2);
-        assert(res.range.last.abs_sheet == range_tests[i].abs_sheet2);
-        if (res.range.last.row != row_unset)
-            assert(res.range.last.abs_row == range_tests[i].abs_row2);
-        if (res.range.last.col != column_unset)
-            assert(res.range.last.abs_col == range_tests[i].abs_col2);
+        assert(range.last.sheet == range_tests[i].sheet2);
+        assert(range.last.row == range_tests[i].row2);
+        assert(range.last.column == range_tests[i].col2);
+        assert(range.last.abs_sheet == range_tests[i].abs_sheet2);
+        if (range.last.row != row_unset)
+            assert(range.last.abs_row == range_tests[i].abs_row2);
+        if (range.last.column != column_unset)
+            assert(range.last.abs_column == range_tests[i].abs_col2);
     }
 
     ref_name_entry range_ref_names[] =
@@ -826,14 +835,14 @@ void test_name_resolver_excel_r1c1()
         const char* p = range_ref_names[i].name;
         string name_r1c1(p);
         cout << "Parsing " << name_r1c1 << endl;
-        formula_name_t res = resolver->resolve(&name_r1c1[0], name_r1c1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_r1c1, abs_address_t());
         if (res.type != formula_name_t::range_reference)
         {
             cerr << "failed to resolve range address: " << name_r1c1 << endl;
             assert(false);
         }
 
-        range_t range = to_range(res.range);
+        auto range = std::get<range_t>(res.value);
         string test_name = resolver->get_name(range, abs_address_t(), range_ref_names[i].sheet_name);
 
         if (name_r1c1 != test_name)
@@ -869,10 +878,10 @@ void test_name_resolver_odff()
     cout << "test name resolver odff" << endl;
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("One"));
-    cxt.append_sheet(IXION_ASCII("Two"));
-    cxt.append_sheet(IXION_ASCII("A B C")); // name with space
-    cxt.append_sheet(IXION_ASCII("80's Music"));
+    cxt.append_sheet("One");
+    cxt.append_sheet("Two");
+    cxt.append_sheet("A B C"); // name with space
+    cxt.append_sheet("80's Music");
 
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::odff, &cxt);
     assert(resolver);
@@ -891,14 +900,14 @@ void test_name_resolver_odff()
     {
         const char* p = single_ref_names[i].name;
         string name_a1(p);
-        formula_name_t res = resolver->resolve(&name_a1[0], name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
         if (res.type != formula_name_t::cell_reference)
         {
             cerr << "failed to resolve cell address: " << name_a1 << endl;
             assert(false);
         }
 
-        address_t addr = to_address(res.address);
+        address_t addr = std::get<address_t>(res.value);
         string test_name = resolver->get_name(addr, abs_address_t(), single_ref_names[i].sheet_name);
 
         if (name_a1 != test_name)
@@ -920,14 +929,14 @@ void test_name_resolver_odff()
     {
         const char* p = range_ref_names[i].name;
         string name_a1(p);
-        formula_name_t res = resolver->resolve(&name_a1[0], name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
         if (res.type != formula_name_t::range_reference)
         {
             cerr << "failed to resolve range address: " << name_a1 << endl;
             assert(false);
         }
 
-        range_t range = to_range(res.range);
+        auto range = std::get<range_t>(res.value);
         string test_name = resolver->get_name(range, abs_address_t(), range_ref_names[i].sheet_name);
 
         if (name_a1 != test_name)
@@ -954,14 +963,14 @@ void test_name_resolver_odff()
         const char* p = addr_with_sheet_names[i].name;
         std::string name_a1(p);
 
-        formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
         if (res.type != formula_name_t::cell_reference)
         {
             cerr << "failed to resolve cell address: " << name_a1 << endl;
             assert(false);
         }
 
-        address_t addr = to_address(res.address);
+        address_t addr = std::get<address_t>(res.value);
         std::string test_name = resolver->get_name(addr, abs_address_t(), addr_with_sheet_names[i].sheet_name);
 
         if (name_a1 != test_name)
@@ -991,14 +1000,14 @@ void test_name_resolver_odff()
         const char* p = ref_with_sheet_names[i].name;
         std::string name_a1(p);
 
-        formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+        formula_name_t res = resolver->resolve(name_a1, abs_address_t());
         if (res.type != formula_name_t::range_reference)
         {
             cerr << "failed to resolve range address: " << name_a1 << endl;
             assert(false);
         }
 
-        range_t range = to_range(res.range);
+        auto range = std::get<range_t>(res.value);
         std::string test_name = resolver->get_name(range, abs_address_t(), ref_with_sheet_names[i].sheet_name);
 
         if (name_a1 != test_name)
@@ -1011,9 +1020,9 @@ void test_name_resolver_odff()
     {
         std::string name = "[.H2:.I2]";
         abs_address_t pos(2, 1, 9);
-        formula_name_t res = resolver->resolve(name.data(), name.size(), pos);
+        formula_name_t res = resolver->resolve(name, pos);
         assert(res.type == formula_name_t::range_reference);
-        abs_range_t range = to_range(res.range).to_abs(pos);
+        abs_range_t range = std::get<range_t>(res.value).to_abs(pos);
         abs_range_t range_expected(abs_address_t(pos.sheet, 1, 7), 1, 2);
         assert(range == range_expected);
     }
@@ -1021,9 +1030,9 @@ void test_name_resolver_odff()
     {
         std::string name = "[Two.$B$2:.$B$10]";
         abs_address_t pos(3, 2, 1);
-        formula_name_t res = resolver->resolve(name.data(), name.size(), pos);
+        formula_name_t res = resolver->resolve(name, pos);
         assert(res.type == formula_name_t::range_reference);
-        abs_range_t range = to_range(res.range).to_abs(pos);
+        abs_range_t range = std::get<range_t>(res.value).to_abs(pos);
         abs_range_t range_expected(abs_address_t(1, 1, 1), 9, 1);
         assert(range == range_expected);
     }
@@ -1031,7 +1040,7 @@ void test_name_resolver_odff()
     {
         std::string name = "MyRange";
         abs_address_t pos(3, 2, 1);
-        formula_name_t res = resolver->resolve(name.data(), name.size(), pos);
+        formula_name_t res = resolver->resolve(name, pos);
         assert(res.type == formula_name_t::named_expression);
     }
 }
@@ -1041,10 +1050,10 @@ void test_name_resolver_odf_cra()
     cout << "test name resolver odf-cra" << endl;
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("One"));
-    cxt.append_sheet(IXION_ASCII("Two"));
-    cxt.append_sheet(IXION_ASCII("Three"));
-    cxt.append_sheet(IXION_ASCII("A B C")); // name with space
+    cxt.append_sheet("One");
+    cxt.append_sheet("Two");
+    cxt.append_sheet("Three");
+    cxt.append_sheet("A B C"); // name with space
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::odf_cra, &cxt);
     assert(resolver);
 
@@ -1085,14 +1094,14 @@ void test_name_resolver_odf_cra()
             const char* p = names[i].name;
             string name_a1(p);
             cout << "single cell address: " << name_a1 << endl;
-            formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), abs_address_t());
+            formula_name_t res = resolver->resolve(name_a1, abs_address_t());
             if (res.type != formula_name_t::cell_reference)
             {
                 cerr << "failed to resolve cell address: " << name_a1 << endl;
                 assert(false);
             }
 
-            address_t addr = to_address(res.address);
+            address_t addr = std::get<address_t>(res.value);
             string test_name = resolver->get_name(addr, abs_address_t(), names[i].sheet_name);
 
             if (name_a1 != test_name)
@@ -1130,14 +1139,14 @@ void test_name_resolver_odf_cra()
                 abs_address_t pos{sheet, 0, 0};
                 string name_a1(names[i].name);
                 cout << "range address: " << name_a1 << endl;
-                formula_name_t res = resolver->resolve(name_a1.data(), name_a1.size(), pos);
+                formula_name_t res = resolver->resolve(name_a1, pos);
                 if (res.type != formula_name_t::range_reference)
                 {
                     cerr << "failed to resolve range address: " << name_a1 << endl;
                     assert(false);
                 }
 
-                range_t range = to_range(res.range);
+                auto range = std::get<range_t>(res.value);
                 std::string test_name = resolver->get_name(range, pos, names[i].sheet_name);
 
                 if (name_a1 != test_name)
@@ -1201,8 +1210,7 @@ bool check_formula_expression(
     size_t n = strlen(p);
     cout << "testing formula expression '" << p << "'" << endl;
 
-    formula_tokens_t tokens = parse_formula_string(
-        cxt, abs_address_t(), resolver, p, n);
+    formula_tokens_t tokens = parse_formula_string(cxt, abs_address_t(), resolver, {p, n});
     std::string expression = print_formula_tokens(cxt, abs_address_t(), resolver, tokens);
 
     int res = strcmp(p, expression.data());
@@ -1269,11 +1277,11 @@ void test_parse_and_print_expressions()
     };
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("Test"));
-    cxt.append_string(IXION_ASCII("Table1"));
-    cxt.append_string(IXION_ASCII("Category"));
-    cxt.append_string(IXION_ASCII("Value"));
-    cxt.append_sheet(IXION_ASCII("Ying & Yang")); // name with '&'
+    cxt.append_sheet("Test");
+    cxt.append_string("Table1");
+    cxt.append_string("Category");
+    cxt.append_string("Value");
+    cxt.append_sheet("Ying & Yang"); // name with '&'
 
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     assert(resolver);
@@ -1338,14 +1346,14 @@ void test_function_name_resolution()
     };
 
     model_context cxt;
-    cxt.append_sheet(IXION_ASCII("Test"));
+    cxt.append_sheet("Test");
     auto resolver = formula_name_resolver::get(ixion::formula_name_resolver_t::excel_a1, &cxt);
     size_t n = IXION_N_ELEMENTS(valid_names);
     for (size_t i = 0; i < n; ++i)
     {
         const char* name = valid_names[i];
         cout << "valid name: " << name << endl;
-        formula_name_t t = resolver->resolve(name, strlen(name), abs_address_t());
+        formula_name_t t = resolver->resolve(name, abs_address_t());
         assert(t.type == formula_name_t::function);
     }
 
@@ -1354,7 +1362,7 @@ void test_function_name_resolution()
     {
         const char* name = invalid_names[i];
         cout << "invalid name: " << name << endl;
-        formula_name_t t = resolver->resolve(name, strlen(name), abs_address_t());
+        formula_name_t t = resolver->resolve(name, abs_address_t());
         assert(t.type != formula_name_t::function);
     }
 }
@@ -1363,7 +1371,7 @@ formula_cell* insert_formula(
     model_context& cxt, const abs_address_t& pos, const char* exp,
     const formula_name_resolver& resolver)
 {
-    formula_tokens_t tokens = parse_formula_string(cxt, pos, resolver, exp, strlen(exp));
+    formula_tokens_t tokens = parse_formula_string(cxt, pos, resolver, exp);
     auto ts = formula_tokens_store::create();
     ts->get() = std::move(tokens);
     formula_cell* p_inserted = cxt.set_formula_cell(pos, ts);
@@ -1383,7 +1391,7 @@ void test_model_context_storage()
         auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
         assert(resolver);
 
-        cxt.append_sheet(IXION_ASCII("test"));
+        cxt.append_sheet("test");
 
         // Test empty cell access.
         cell_access ca = cxt.get_cell_access(abs_address_t(0, 0, 0));
@@ -1391,14 +1399,12 @@ void test_model_context_storage()
         assert(ca.get_value_type() == cell_value_t::empty);
 
         // String value on an empty cell should be an empty string.
-        const std::string* ps = ca.get_string_value();
-        assert(ps);
-        assert(ps->empty());
+        std::string_view s = ca.get_string_value();
+        assert(s.empty());
 
         // Likewise...
-        ps = cxt.get_string_value(abs_address_t(0, 0, 0));
-        assert(ps);
-        assert(ps->empty());
+        s = cxt.get_string_value(abs_address_t(0, 0, 0));
+        assert(s.empty());
 
         // Test storage of numeric values.
         volatile double val = 0.1;
@@ -1424,7 +1430,7 @@ void test_model_context_storage()
         // Test formula cells.
         abs_address_t pos(0,3,0);
         const char* exp = "SUM(1,2,3)";
-        formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, exp, strlen(exp));
+        formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, exp);
         auto ts = formula_tokens_store::create();
         ts->get() = std::move(tokens);
         formula_cell* p_inserted = cxt.set_formula_cell(pos, ts);
@@ -1445,17 +1451,17 @@ void test_model_context_storage()
         auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
         assert(resolver);
 
-        cxt.append_sheet(IXION_ASCII("test"));
+        cxt.append_sheet("test");
         string exp = "1";
-        cxt.set_formula_cell(abs_address_t(0,0,0), parse_formula_string(cxt, abs_address_t(0,0,0), *resolver, &exp[0], exp.size()));
-        cxt.set_formula_cell(abs_address_t(0,2,0), parse_formula_string(cxt, abs_address_t(0,2,0), *resolver, &exp[0], exp.size()));
-        cxt.set_formula_cell(abs_address_t(0,1,0), parse_formula_string(cxt, abs_address_t(0,1,0), *resolver, &exp[0], exp.size()));
+        cxt.set_formula_cell(abs_address_t(0,0,0), parse_formula_string(cxt, abs_address_t(0,0,0), *resolver, exp));
+        cxt.set_formula_cell(abs_address_t(0,2,0), parse_formula_string(cxt, abs_address_t(0,2,0), *resolver, exp));
+        cxt.set_formula_cell(abs_address_t(0,1,0), parse_formula_string(cxt, abs_address_t(0,1,0), *resolver, exp));
     }
 
     {
         // Test data area.
         model_context cxt;
-        cxt.append_sheet(IXION_ASCII("test"));
+        cxt.append_sheet("test");
 
         abs_range_t area = cxt.get_data_range(0);
         assert(!area.valid());
@@ -1497,7 +1503,7 @@ void test_model_context_storage()
         const row_t row_size = 5;
         const col_t col_size = 4;
         model_context cxt({row_size, col_size});
-        cxt.append_sheet(IXION_ASCII("test"));
+        cxt.append_sheet("test");
         for (row_t row = 0; row < row_size; ++row)
             for (col_t col = 0; col < col_size; ++col)
                 cxt.set_numeric_cell(abs_address_t(0,row,col), 1.0);
@@ -1516,7 +1522,7 @@ void test_model_context_storage()
         const row_t row_size = 5;
         const col_t col_size = 4;
         model_context cxt({row_size, col_size});
-        cxt.append_sheet(IXION_ASCII("test"));
+        cxt.append_sheet("test");
         cxt.set_numeric_cell(abs_address_t(0,0,0), 1.0);
         cxt.set_numeric_cell(abs_address_t(0,row_size-1,0), 1.0);
         cxt.set_numeric_cell(abs_address_t(0,row_size/2,col_size/2), 1.0);
@@ -1541,17 +1547,15 @@ void test_model_context_direct_string_access()
 
     // regular string cell
     abs_address_t B2(0, 1, 1);
-    cxt.set_string_cell(B2, IXION_ASCII("string cell"));
-    const std::string* p = cxt.get_string_value(B2);
-    assert(p);
-    assert(*p == "string cell");
+    cxt.set_string_cell(B2, "string cell");
+    std::string_view s = cxt.get_string_value(B2);
+    assert(s == "string cell");
 
     cell_access ca = cxt.get_cell_access(B2);
     assert(ca.get_type() == celltype_t::string);
     assert(ca.get_value_type() == cell_value_t::string);
-    p = ca.get_string_value();
-    assert(p);
-    assert(*p == "string cell");
+    s = ca.get_string_value();
+    assert(s == "string cell");
 
     // formula cell containing a string result.
     abs_address_t C4(0, 3, 2);
@@ -1559,8 +1563,7 @@ void test_model_context_direct_string_access()
     assert(resolver);
 
     // Insert a formula containing one literal string token.
-    formula_tokens_t tokens = parse_formula_string(
-        cxt, C4, *resolver, IXION_ASCII("\"string value in formula\""));
+    formula_tokens_t tokens = parse_formula_string(cxt, C4, *resolver, "\"string value in formula\"");
     assert(tokens.size() == 1);
     cxt.set_formula_cell(C4, std::move(tokens));
     // no need to register formula cell since it does not reference other cells.
@@ -1569,16 +1572,14 @@ void test_model_context_direct_string_access()
     auto sorted = query_and_sort_dirty_cells(cxt, abs_range_set_t(), &formula_cells);
     calculate_sorted_cells(cxt, sorted, 1);
 
-    p = cxt.get_string_value(C4);
-    assert(p);
-    assert(*p == "string value in formula");
+    s = cxt.get_string_value(C4);
+    assert(s == "string value in formula");
 
     ca = cxt.get_cell_access(C4);
     assert(ca.get_type() == celltype_t::formula);
     assert(ca.get_value_type() == cell_value_t::string);
-    p = ca.get_string_value();
-    assert(p);
-    assert(*p == "string value in formula");
+    s = ca.get_string_value();
+    assert(s == "string value in formula");
 }
 
 void test_model_context_named_expression()
@@ -1604,11 +1605,11 @@ void test_model_context_named_expression()
 
     for (const test_case& tc : tcs)
     {
-        formula_tokens_t tokens = parse_formula_string(cxt, tc.origin, *resolver, tc.formula.data(), tc.formula.size());
+        formula_tokens_t tokens = parse_formula_string(cxt, tc.origin, *resolver, tc.formula);
         std::string test = print_formula_tokens(cxt, tc.origin, *resolver, tokens);
         assert(test == tc.formula);
 
-        cxt.set_named_expression(tc.name.data(), tc.name.size(), tc.origin, std::move(tokens));
+        cxt.set_named_expression(tc.name, tc.origin, std::move(tokens));
     }
 
     for (const test_case& tc : tcs)
@@ -1618,6 +1619,62 @@ void test_model_context_named_expression()
         assert(exp->origin == tc.origin);
         std::string test = print_formula_tokens(cxt, exp->origin, *resolver, exp->tokens);
         assert(test == tc.formula);
+    }
+
+    // invalid names should be rejected.
+    struct name_test_case
+    {
+        std::string name;
+        bool valid;
+    };
+
+    std::vector<name_test_case> invalid_names = {
+        { "Name 1", false },
+        { "Name_1", true },
+        { "123Name", false },
+        { "Name123", true },
+        { "", false },
+        { "Name.1", true },
+        { ".Name.2", false },
+    };
+
+    for (const name_test_case& tc : invalid_names)
+    {
+        abs_address_t origin;
+        std::string formula = "1+2";
+
+        if (tc.valid)
+        {
+            formula_tokens_t tokens = parse_formula_string(cxt, origin, *resolver, formula);
+            cxt.set_named_expression(tc.name, origin, std::move(tokens));
+
+            tokens = parse_formula_string(cxt, origin, *resolver, formula);
+            cxt.set_named_expression(0, tc.name, origin, std::move(tokens));
+        }
+        else
+        {
+            try
+            {
+                formula_tokens_t tokens = parse_formula_string(cxt, origin, *resolver, formula);
+                cxt.set_named_expression(tc.name, origin, std::move(tokens));
+                assert(!"named expression with invalid name should have been rejected!");
+            }
+            catch (const model_context_error& e)
+            {
+                assert(e.get_error_type() == model_context_error::invalid_named_expression);
+            }
+
+            try
+            {
+                formula_tokens_t tokens = parse_formula_string(cxt, origin, *resolver, formula);
+                cxt.set_named_expression(0, tc.name, origin, std::move(tokens));
+                assert(!"named expression with invalid name should have been rejected!");
+            }
+            catch (const model_context_error& e)
+            {
+                assert(e.get_error_type() == model_context_error::invalid_named_expression);
+            }
+        }
     }
 }
 
@@ -1666,7 +1723,7 @@ void test_model_context_iterator_horizontal()
 
     // Insert an actual sheet and try again.
 
-    cxt.append_sheet(IXION_ASCII("empty sheet"));
+    cxt.append_sheet("empty sheet");
     iter = cxt.get_model_iterator(0, rc_direction_t::horizontal, whole_range);
 
     // Make sure the cell position iterates correctly.
@@ -1683,11 +1740,11 @@ void test_model_context_iterator_horizontal()
     }
 
     assert(!iter.has()); // There should be no more cells on this sheet.
-    assert(cell_count = 10);
+    assert(cell_count == 10);
 
-    cxt.append_sheet(IXION_ASCII("values"));
-    cxt.set_string_cell(abs_address_t(1, 0, 0), IXION_ASCII("F1"));
-    cxt.set_string_cell(abs_address_t(1, 0, 1), IXION_ASCII("F2"));
+    cxt.append_sheet("values");
+    cxt.set_string_cell(abs_address_t(1, 0, 0), "F1");
+    cxt.set_string_cell(abs_address_t(1, 0, 1), "F2");
     cxt.set_boolean_cell(abs_address_t(1, 1, 0), true);
     cxt.set_boolean_cell(abs_address_t(1, 1, 1), false);
     cxt.set_numeric_cell(abs_address_t(1, 2, 0), 3.14);
@@ -1696,8 +1753,7 @@ void test_model_context_iterator_horizontal()
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     abs_range_set_t modified_cells;
     abs_address_t pos(1, 3, 0);
-    formula_tokens_t tokens = parse_formula_string(
-        cxt, pos, *resolver, IXION_ASCII("SUM(1, 2, 3)"));
+    formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, "SUM(1, 2, 3)");
     formula_cell* p = cxt.set_formula_cell(pos, std::move(tokens));
     assert(p);
     const formula_tokens_t& t = p->get_tokens()->get();
@@ -1706,8 +1762,7 @@ void test_model_context_iterator_horizontal()
     modified_cells.insert(pos);
 
     pos.column = 1;
-    tokens = parse_formula_string(
-        cxt, pos, *resolver, IXION_ASCII("5 + 6 - 7"));
+    tokens = parse_formula_string(cxt, pos, *resolver, "5 + 6 - 7");
     p = cxt.set_formula_cell(pos, std::move(tokens));
     register_formula_cell(cxt, pos, p);
     modified_cells.insert(pos);
@@ -1719,8 +1774,8 @@ void test_model_context_iterator_horizontal()
     std::vector<model_iterator::cell> checks =
     {
         // row, column, value
-        { 0, 0, cxt.get_identifier_from_string(IXION_ASCII("F1")) },
-        { 0, 1, cxt.get_identifier_from_string(IXION_ASCII("F2")) },
+        { 0, 0, cxt.get_identifier_from_string("F1") },
+        { 0, 1, cxt.get_identifier_from_string("F2") },
         { 1, 0, true },
         { 1, 1, false },
         { 2, 0, 3.14 },
@@ -1765,14 +1820,14 @@ void test_model_context_iterator_horizontal_range()
     std::vector<model_iterator::cell> checks =
     {
         // row, column, value
-        { 0, 0, cxt.get_identifier_from_string(IXION_ASCII("F1")) },
-        { 0, 1, cxt.get_identifier_from_string(IXION_ASCII("F2")) },
-        { 0, 2, cxt.get_identifier_from_string(IXION_ASCII("F3")) },
-        { 0, 3, cxt.get_identifier_from_string(IXION_ASCII("F4")) },
-        { 0, 4, cxt.get_identifier_from_string(IXION_ASCII("F5")) },
+        { 0, 0, cxt.get_identifier_from_string("F1") },
+        { 0, 1, cxt.get_identifier_from_string("F2") },
+        { 0, 2, cxt.get_identifier_from_string("F3") },
+        { 0, 3, cxt.get_identifier_from_string("F4") },
+        { 0, 4, cxt.get_identifier_from_string("F5") },
         { 1, 0, 1.0 },
         { 1, 1, true },
-        { 1, 2, cxt.get_identifier_from_string(IXION_ASCII("s1")) },
+        { 1, 2, cxt.get_identifier_from_string("s1") },
         { 1, 3 },
         { 1, 4 },
     };
@@ -1790,17 +1845,17 @@ void test_model_context_iterator_horizontal_range()
         { 2, 0, 1.1 },
         { 2, 1, false },
         { 2, 2 },
-        { 2, 3, cxt.get_identifier_from_string(IXION_ASCII("s2")) },
+        { 2, 3, cxt.get_identifier_from_string("s2") },
         { 2, 4 },
         { 3, 0, 1.2 },
         { 3, 1, false },
         { 3, 2 },
-        { 3, 3, cxt.get_identifier_from_string(IXION_ASCII("s3")) },
+        { 3, 3, cxt.get_identifier_from_string("s3") },
         { 3, 4 },
         { 4, 0, 1.3 },
         { 4, 1, true },
         { 4, 2 },
-        { 4, 3, cxt.get_identifier_from_string(IXION_ASCII("s4")) },
+        { 4, 3, cxt.get_identifier_from_string("s4") },
         { 4, 4 },
     };
 
@@ -1816,21 +1871,21 @@ void test_model_context_iterator_horizontal_range()
     checks =
     {
         // row, column, value
-        { 0, 1, cxt.get_identifier_from_string(IXION_ASCII("F2")) },
-        { 0, 2, cxt.get_identifier_from_string(IXION_ASCII("F3")) },
-        { 0, 3, cxt.get_identifier_from_string(IXION_ASCII("F4")) },
+        { 0, 1, cxt.get_identifier_from_string("F2") },
+        { 0, 2, cxt.get_identifier_from_string("F3") },
+        { 0, 3, cxt.get_identifier_from_string("F4") },
         { 1, 1, true },
-        { 1, 2, cxt.get_identifier_from_string(IXION_ASCII("s1")) },
+        { 1, 2, cxt.get_identifier_from_string("s1") },
         { 1, 3 },
         { 2, 1, false },
         { 2, 2 },
-        { 2, 3, cxt.get_identifier_from_string(IXION_ASCII("s2")) },
+        { 2, 3, cxt.get_identifier_from_string("s2") },
         { 3, 1, false },
         { 3, 2 },
-        { 3, 3, cxt.get_identifier_from_string(IXION_ASCII("s3")) },
+        { 3, 3, cxt.get_identifier_from_string("s3") },
         { 4, 1, true },
         { 4, 2 },
-        { 4, 3, cxt.get_identifier_from_string(IXION_ASCII("s4")) },
+        { 4, 3, cxt.get_identifier_from_string("s4") },
     };
 
     assert(check_model_iterator_output(iter, checks));
@@ -1858,9 +1913,9 @@ void test_model_context_iterator_vertical()
 
     // Make sure the cell position iterates correctly.
     size_t cell_count = 0;
-    for (col_t col = 0; col < col_size; ++cell_count, ++col)
+    for (col_t col = 0; col < col_size; ++col)
     {
-        for (row_t row = 0; row < row_size; ++row, iter.next())
+        for (row_t row = 0; row < row_size; ++cell_count, ++row, iter.next())
         {
             const model_iterator::cell& cell = iter.get();
             assert(iter.has());
@@ -1871,11 +1926,11 @@ void test_model_context_iterator_vertical()
     }
 
     assert(!iter.has()); // There should be no more cells on this sheet.
-    assert(cell_count = 10);
+    assert(cell_count == 10);
 
     cxt.append_sheet("values");
-    cxt.set_string_cell(abs_address_t(1, 0, 0), IXION_ASCII("F1"));
-    cxt.set_string_cell(abs_address_t(1, 0, 1), IXION_ASCII("F2"));
+    cxt.set_string_cell(abs_address_t(1, 0, 0), "F1");
+    cxt.set_string_cell(abs_address_t(1, 0, 1), "F2");
     cxt.set_boolean_cell(abs_address_t(1, 1, 0), true);
     cxt.set_boolean_cell(abs_address_t(1, 1, 1), false);
     cxt.set_numeric_cell(abs_address_t(1, 2, 0), 3.14);
@@ -1884,15 +1939,13 @@ void test_model_context_iterator_vertical()
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     abs_range_set_t modified_cells;
     abs_address_t pos(1, 3, 0);
-    formula_tokens_t tokens = parse_formula_string(
-        cxt, pos, *resolver, IXION_ASCII("SUM(1, 2, 3)"));
+    formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, "SUM(1, 2, 3)");
     cxt.set_formula_cell(pos, std::move(tokens));
     register_formula_cell(cxt, pos);
     modified_cells.insert(pos);
 
     pos.column = 1;
-    tokens = parse_formula_string(
-        cxt, pos, *resolver, IXION_ASCII("5 + 6 - 7"));
+    tokens = parse_formula_string(cxt, pos, *resolver, "5 + 6 - 7");
     cxt.set_formula_cell(pos, std::move(tokens));
     register_formula_cell(cxt, pos);
     modified_cells.insert(pos);
@@ -1904,13 +1957,13 @@ void test_model_context_iterator_vertical()
     std::vector<model_iterator::cell> checks =
     {
         // row, column, value
-        { 0, 0, cxt.get_identifier_from_string(IXION_ASCII("F1")) },
+        { 0, 0, cxt.get_identifier_from_string("F1") },
         { 1, 0, true },
         { 2, 0, 3.14 },
         { 3, 0, cxt.get_formula_cell(abs_address_t(1, 3, 0)) },
         { 4, 0 },
 
-        { 0, 1, cxt.get_identifier_from_string(IXION_ASCII("F2")) },
+        { 0, 1, cxt.get_identifier_from_string("F2") },
         { 1, 1, false },
         { 2, 1, -12.5 },
         { 3, 1, cxt.get_formula_cell(abs_address_t(1, 3, 1)) },
@@ -1950,15 +2003,15 @@ void test_model_context_iterator_vertical_range()
     std::vector<model_iterator::cell> checks =
     {
         // row, column, value
-        { 0, 0, cxt.get_identifier_from_string(IXION_ASCII("F1")) },
+        { 0, 0, cxt.get_identifier_from_string("F1") },
         { 1, 0, 1.0 },
-        { 0, 1, cxt.get_identifier_from_string(IXION_ASCII("F2")) },
+        { 0, 1, cxt.get_identifier_from_string("F2") },
         { 1, 1, true },
-        { 0, 2, cxt.get_identifier_from_string(IXION_ASCII("F3")) },
-        { 1, 2, cxt.get_identifier_from_string(IXION_ASCII("s1")) },
-        { 0, 3, cxt.get_identifier_from_string(IXION_ASCII("F4")) },
+        { 0, 2, cxt.get_identifier_from_string("F3") },
+        { 1, 2, cxt.get_identifier_from_string("s1") },
+        { 0, 3, cxt.get_identifier_from_string("F4") },
         { 1, 3 },
-        { 0, 4, cxt.get_identifier_from_string(IXION_ASCII("F5")) },
+        { 0, 4, cxt.get_identifier_from_string("F5") },
         { 1, 4 },
     };
 
@@ -1979,10 +2032,10 @@ void test_model_context_iterator_vertical_range()
         { 9, 1, 299.9 },
         { 8, 2 },
         { 9, 2 },
-        { 8, 3, cxt.get_identifier_from_string(IXION_ASCII("s8")) },
-        { 9, 3, cxt.get_identifier_from_string(IXION_ASCII("s9")) },
+        { 8, 3, cxt.get_identifier_from_string("s8") },
+        { 9, 3, cxt.get_identifier_from_string("s9") },
         { 8, 4 },
-        { 9, 4, cxt.get_identifier_from_string(IXION_ASCII("end")) },
+        { 9, 4, cxt.get_identifier_from_string("end") },
     };
 
     assert(check_model_iterator_output(iter, checks));
@@ -2013,9 +2066,9 @@ void test_model_context_iterator_vertical_range()
 
     checks =
     {
-        { 0, 3, cxt.get_identifier_from_string(IXION_ASCII("F4")) },
+        { 0, 3, cxt.get_identifier_from_string("F4") },
         { 1, 3 },
-        { 0, 4, cxt.get_identifier_from_string(IXION_ASCII("F5")) },
+        { 0, 4, cxt.get_identifier_from_string("F5") },
         { 1, 4 },
     };
 
@@ -2030,7 +2083,7 @@ void test_model_context_iterator_vertical_range()
     iter = cxt.get_model_iterator(0, rc_direction_t::vertical, range);
     checks =
     {
-        { 5, 3, cxt.get_identifier_from_string(IXION_ASCII("s5")) },
+        { 5, 3, cxt.get_identifier_from_string("s5") },
     };
 
     assert(check_model_iterator_output(iter, checks));
@@ -2045,8 +2098,8 @@ void test_model_context_iterator_named_exps()
     };
 
     model_context cxt{{100, 10}};
-    cxt.append_sheet(IXION_ASCII("test1"));
-    cxt.append_sheet(IXION_ASCII("test2"));
+    cxt.append_sheet("test1");
+    cxt.append_sheet("test2");
 
     named_expressions_iterator iter;
     assert(!iter.has());
@@ -2061,8 +2114,7 @@ void test_model_context_iterator_named_exps()
 
     auto tokenize = [&](const char* p) -> formula_tokens_t
     {
-        size_t n = strlen(p);
-        return parse_formula_string(cxt, abs_address_t(), *resolver, p, n);
+        return parse_formula_string(cxt, abs_address_t(), *resolver, p);
     };
 
     auto validate = [](named_expressions_iterator _iter, const std::vector<check>& _expected) -> bool
@@ -2105,7 +2157,7 @@ void test_model_context_iterator_named_exps()
         return true;
     };
 
-    cxt.set_named_expression(IXION_ASCII("MyCalc"), tokenize("(1+2)/3"));
+    cxt.set_named_expression("MyCalc", tokenize("(1+2)/3"));
 
     std::vector<check> expected =
     {
@@ -2115,7 +2167,7 @@ void test_model_context_iterator_named_exps()
     iter = cxt.get_named_expressions_iterator();
     assert(validate(iter, expected));
 
-    cxt.set_named_expression(IXION_ASCII("RefToRight"), tokenize("B1"));
+    cxt.set_named_expression("RefToRight", tokenize("B1"));
 
     expected =
     {
@@ -2126,8 +2178,8 @@ void test_model_context_iterator_named_exps()
     iter = cxt.get_named_expressions_iterator();
     assert(validate(iter, expected));
 
-    cxt.set_named_expression(1, IXION_ASCII("MyCalc2"), tokenize("(B1+C1)/D1"));
-    cxt.set_named_expression(1, IXION_ASCII("MyCalc3"), tokenize("B1/(PI()*2)"));
+    cxt.set_named_expression(1, "MyCalc2", tokenize("(B1+C1)/D1"));
+    cxt.set_named_expression(1, "MyCalc3", tokenize("B1/(PI()*2)"));
 
     iter = cxt.get_named_expressions_iterator(0);
     assert(!iter.has());
@@ -2147,7 +2199,7 @@ void test_model_context_fill_down()
 {
     nullptr_t empty = nullptr;
     model_context cxt{{100, 10}};
-    cxt.append_sheet(IXION_ASCII("test"));
+    cxt.append_sheet("test");
     cxt.set_cell_values(0, {
         { "numeric", "bool", "string",  "empty" },
         {      12.3,   true,    "foo",    empty },
@@ -2195,14 +2247,14 @@ void test_model_context_error_value()
     cout << "test model context error value" << endl;
 
     model_context cxt{{100, 10}};
-    cxt.append_sheet(IXION_ASCII("test"));
+    cxt.append_sheet("test");
 
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     assert(resolver);
 
     abs_address_t pos(0,3,0);
     const char* exp = "10/0";
-    formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, exp, strlen(exp));
+    formula_tokens_t tokens = parse_formula_string(cxt, pos, *resolver, exp);
     formula_cell* fc = cxt.set_formula_cell(pos, std::move(tokens));
     fc->interpret(cxt, pos);
 
@@ -2220,7 +2272,7 @@ void test_volatile_function()
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     assert(resolver);
 
-    cxt.append_sheet(IXION_ASCII("test"));
+    cxt.append_sheet("test");
 
     abs_range_set_t dirty_cells;
     abs_range_set_t modified_cells;
@@ -2293,24 +2345,23 @@ void test_volatile_function()
 void test_invalid_formula_tokens()
 {
     model_context cxt;
-    mem_str_buf invalid_formula("invalid formula");
-    mem_str_buf error_msg("failed to parse formula");
+    std::string_view invalid_formula("invalid formula");
+    std::string_view error_msg("failed to parse formula");
 
-    formula_tokens_t tokens = create_formula_error_tokens(
-        cxt, invalid_formula.get(), invalid_formula.size(), error_msg.get(), error_msg.size());
+    formula_tokens_t tokens = create_formula_error_tokens(cxt, invalid_formula, error_msg);
 
     assert(tokens[0]->get_opcode() == fop_error);
-    assert(tokens.size() == (tokens[0]->get_index() + 1));
+    assert(tokens.size() == (tokens[0]->get_uint32() + 1));
 
     assert(tokens[1]->get_opcode() == fop_string);
-    string_id_t sid = tokens[1]->get_index();
+    string_id_t sid = tokens[1]->get_uint32();
     const std::string* s = cxt.get_string(sid);
-    assert(invalid_formula.str() == *s);
+    assert(invalid_formula == *s);
 
     assert(tokens[2]->get_opcode() == fop_string);
-    sid = tokens[2]->get_index();
+    sid = tokens[2]->get_uint32();
     s = cxt.get_string(sid);
-    assert(error_msg.str() == *s);
+    assert(error_msg == *s);
 }
 
 void test_grouped_formula_string_results()
@@ -2323,24 +2374,20 @@ void test_grouped_formula_string_results()
 
     abs_range_t A1B2(0, 0, 0, 2, 2);
 
-    formula_tokens_t tokens = parse_formula_string(
-        cxt, A1B2.first, *resolver, IXION_ASCII("\"literal string\""));
+    formula_tokens_t tokens = parse_formula_string(cxt, A1B2.first, *resolver, "\"literal string\"");
 
     matrix res_value(2, 2, std::string("literal string"));
     formula_result res(std::move(res_value));
     cxt.set_grouped_formula_cells(A1B2, std::move(tokens), std::move(res));
 
-    const std::string* p = cxt.get_string_value(A1B2.last);
-    assert(p);
-    assert(*p == "literal string");
+    std::string_view s = cxt.get_string_value(A1B2.last);
+    assert(s == "literal string");
 }
 
 } // anonymous namespace
 
 int main()
 {
-    ixion::init();
-
     test_size();
     test_string_to_double();
     test_string_pool();

@@ -6,13 +6,14 @@
  */
 
 #include "ixion/global.hpp"
-#include "ixion/mem_str_buf.hpp"
 #include "ixion/address.hpp"
 #include "ixion/matrix.hpp"
 #include "ixion/cell.hpp"
 #include "ixion/exceptions.hpp"
 #include "ixion/formula_result.hpp"
 #include "ixion/interface/formula_model_access.hpp"
+
+#include "mem_str_buf.hpp"
 
 #include <iostream>
 #include <cstdlib>
@@ -24,19 +25,7 @@ using namespace std;
 
 namespace ixion {
 
-void init()
-{
-}
-
-const char* get_formula_result_output_separator()
-{
-
-    static const char* sep =
-        "---------------------------------------------------------";
-    return sep;
-}
-
-double global::get_current_time()
+double get_current_time()
 {
     unsigned long usec_since_epoch =
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -45,22 +34,11 @@ double global::get_current_time()
     return usec_since_epoch / 1000000.0;
 }
 
-void global::load_file_content(const string& filepath, string& content)
+double to_double(std::string_view s)
 {
-    ifstream file(filepath.c_str());
-    if (!file)
-        // failed to open the specified file.
-        throw file_not_found(filepath);
+    const char* p = s.data();
+    std::size_t n = s.size();
 
-    ostringstream os;
-    os << file.rdbuf();
-    file.close();
-
-    os.str().swap(content);
-}
-
-double global::to_double(const char* p, size_t n)
-{
     if (!n)
         return 0.0;
 
@@ -118,63 +96,9 @@ double global::to_double(const char* p, size_t n)
     return sign*val;
 }
 
-bool global::to_bool(const char* p, size_t n)
+bool to_bool(std::string_view s)
 {
-    if (n == 4)
-    {
-        if (*p++ == 't' && *p++ == 'r' && *p++ == 'u' && *p == 'e')
-            return true;
-    }
-
-    return false;
-}
-
-// ============================================================================
-
-struct formula_error::impl
-{
-    formula_error_t error;
-    std::string msg;
-    std::string buffer;
-
-    impl(formula_error_t _error) :
-        error(_error) {}
-
-    impl(formula_error_t _error, std::string _msg) :
-        error(_error), msg(std::move(_msg)) {}
-};
-
-formula_error::formula_error(formula_error_t fe) :
-    mp_impl(ixion::make_unique<impl>(fe)) {}
-
-formula_error::formula_error(formula_error_t fe, std::string msg) :
-    mp_impl(ixion::make_unique<impl>(fe, std::move(msg))) {}
-
-formula_error::formula_error(formula_error&& other) :
-    mp_impl(std::move(other.mp_impl))
-{
-    other.mp_impl = ixion::make_unique<impl>(formula_error_t::no_error);
-}
-
-formula_error::~formula_error() throw()
-{
-}
-
-const char* formula_error::what() const throw()
-{
-    const char* error_name = get_formula_error_name(mp_impl->error);
-    if (mp_impl->msg.empty())
-        return error_name;
-
-    std::ostringstream os;
-    os << mp_impl->msg << " (type: " << error_name << ")";
-    mp_impl->buffer = os.str();
-    return mp_impl->buffer.data();
-}
-
-formula_error_t formula_error::get_error() const
-{
-    return mp_impl->error;
+    return s == "true";
 }
 
 }

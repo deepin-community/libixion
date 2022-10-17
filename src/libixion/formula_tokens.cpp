@@ -5,18 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/formula_tokens.hpp"
-#include "ixion/exceptions.hpp"
-#include "ixion/global.hpp"
-
-using ::std::string;
+#include <ixion/formula_tokens.hpp>
+#include <ixion/exceptions.hpp>
+#include <ixion/global.hpp>
+#include <ixion/macros.hpp>
 
 namespace ixion {
 
-const char* get_opcode_name(fopcode_t oc)
+std::string_view get_opcode_name(fopcode_t oc)
 {
     // Make sure the names are ordered identically to the ordering of the enum members.
-    static const std::vector<const char*> names = {
+    static const std::string_view names[] = {
         "unknown", // fop_unknown
         "single ref", // fop_single_ref
         "range ref", // fop_range_ref
@@ -43,18 +42,18 @@ const char* get_opcode_name(fopcode_t oc)
         "error", // fop_error
     };
 
-    if (size_t(oc) >= names.size())
+    if (std::size_t(oc) >= IXION_N_ELEMENTS(names))
         return "???";
 
     return names[oc];
 }
 
-const char* get_formula_opcode_string(fopcode_t oc)
+std::string_view get_formula_opcode_string(fopcode_t oc)
 {
     static const char* empty = "";
 
     // Make sure the names are ordered identically to the ordering of the enum members.
-    static const std::vector<const char*> names = {
+    static const std::string_view names[] = {
         empty, // fop_unknown
         empty, // fop_single_ref
         empty, // fop_range_ref
@@ -81,7 +80,7 @@ const char* get_formula_opcode_string(fopcode_t oc)
         empty, // fop_error
     };
 
-    if (size_t(oc) >= names.size())
+    if (std::size_t(oc) >= IXION_N_ELEMENTS(names))
         return empty;
 
     return names[oc];
@@ -132,11 +131,11 @@ bool formula_token::operator== (const formula_token& r) const
         case fop_named_expression:
             return get_name() == r.get_name();
         case fop_string:
-            return get_index() == r.get_index();
+            return get_uint32() == r.get_uint32();
         case fop_value:
             return get_value() == r.get_value();
         case fop_function:
-            return get_index() == r.get_index();
+            return get_uint32() == r.get_uint32();
         default:
             ;
     }
@@ -168,7 +167,7 @@ double formula_token::get_value() const
     return 0.0;
 }
 
-size_t formula_token::get_index() const
+uint32_t formula_token::get_uint32() const
 {
     return 0;
 }
@@ -191,7 +190,7 @@ struct formula_tokens_store::impl
 };
 
 formula_tokens_store::formula_tokens_store() :
-    mp_impl(ixion::make_unique<impl>())
+    mp_impl(std::make_unique<impl>())
 {
 }
 

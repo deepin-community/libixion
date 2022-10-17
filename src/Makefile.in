@@ -92,7 +92,8 @@ bin_PROGRAMS = ixion-parser$(EXEEXT) ixion-sorter$(EXEEXT) \
 	ixion-formula-tokenizer$(EXEEXT)
 subdir = src
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/m4/ax_cxx_compile_stdcxx_11.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/m4/ax_cxx_compile_stdcxx.m4 \
+	$(top_srcdir)/m4/ax_cxx_compile_stdcxx_17.m4 \
 	$(top_srcdir)/m4/boost.m4 $(top_srcdir)/m4/libtool.m4 \
 	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
 	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
@@ -118,12 +119,12 @@ am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
 am_ixion_parser_OBJECTS = ixion_parser.$(OBJEXT) \
-	model_parser.$(OBJEXT) session_handler.$(OBJEXT) \
-	table_handler.$(OBJEXT)
+	model_parser.$(OBJEXT) app_common.$(OBJEXT) \
+	session_handler.$(OBJEXT) table_handler.$(OBJEXT)
 ixion_parser_OBJECTS = $(am_ixion_parser_OBJECTS)
 ixion_parser_DEPENDENCIES = libixion/libixion-@IXION_API_VERSION@.la \
 	$(am__DEPENDENCIES_1)
-am_ixion_sorter_OBJECTS = ixion_sorter.$(OBJEXT) \
+am_ixion_sorter_OBJECTS = ixion_sorter.$(OBJEXT) app_common.$(OBJEXT) \
 	sort_input_parser.$(OBJEXT)
 ixion_sorter_OBJECTS = $(am_ixion_sorter_OBJECTS)
 ixion_sorter_DEPENDENCIES = libixion/libixion-@IXION_API_VERSION@.la \
@@ -143,7 +144,8 @@ am__v_at_1 =
 DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
-am__depfiles_remade = ./$(DEPDIR)/ixion_formula_tokenizer.Po \
+am__depfiles_remade = ./$(DEPDIR)/app_common.Po \
+	./$(DEPDIR)/ixion_formula_tokenizer.Po \
 	./$(DEPDIR)/ixion_parser.Po ./$(DEPDIR)/ixion_sorter.Po \
 	./$(DEPDIR)/model_parser.Po ./$(DEPDIR)/session_handler.Po \
 	./$(DEPDIR)/sort_input_parser.Po ./$(DEPDIR)/table_handler.Po
@@ -504,7 +506,7 @@ EGREP = @EGREP@
 EXEEXT = @EXEEXT@
 FGREP = @FGREP@
 GREP = @GREP@
-HAVE_CXX11 = @HAVE_CXX11@
+HAVE_CXX17 = @HAVE_CXX17@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -562,6 +564,8 @@ SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 STRIP = @STRIP@
 VERSION = @VERSION@
+VULKAN_CFLAGS = @VULKAN_CFLAGS@
+VULKAN_LIBS = @VULKAN_LIBS@
 abs_builddir = @abs_builddir@
 abs_srcdir = @abs_srcdir@
 abs_top_builddir = @abs_top_builddir@
@@ -630,6 +634,8 @@ ixion_parser_SOURCES = \
 	ixion_parser.cpp \
 	model_parser.hpp \
 	model_parser.cpp \
+	app_common.hpp \
+	app_common.cpp \
 	session_handler.hpp \
 	session_handler.cpp \
 	table_handler.hpp \
@@ -640,6 +646,7 @@ ixion_parser_LDADD = libixion/libixion-@IXION_API_VERSION@.la \
 
 ixion_sorter_SOURCES = \
 	ixion_sorter.cpp \
+	app_common.cpp \
 	sort_input_parser.hpp \
 	sort_input_parser.cpp
 
@@ -768,6 +775,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/app_common.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_formula_tokenizer.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_parser.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ixion_sorter.Po@am__quote@ # am--include-marker
@@ -1232,7 +1240,8 @@ clean: clean-recursive
 clean-am: clean-binPROGRAMS clean-generic clean-libtool mostlyclean-am
 
 distclean: distclean-recursive
-		-rm -f ./$(DEPDIR)/ixion_formula_tokenizer.Po
+		-rm -f ./$(DEPDIR)/app_common.Po
+	-rm -f ./$(DEPDIR)/ixion_formula_tokenizer.Po
 	-rm -f ./$(DEPDIR)/ixion_parser.Po
 	-rm -f ./$(DEPDIR)/ixion_sorter.Po
 	-rm -f ./$(DEPDIR)/model_parser.Po
@@ -1284,7 +1293,8 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-recursive
-		-rm -f ./$(DEPDIR)/ixion_formula_tokenizer.Po
+		-rm -f ./$(DEPDIR)/app_common.Po
+	-rm -f ./$(DEPDIR)/ixion_formula_tokenizer.Po
 	-rm -f ./$(DEPDIR)/ixion_parser.Po
 	-rm -f ./$(DEPDIR)/ixion_sorter.Po
 	-rm -f ./$(DEPDIR)/model_parser.Po

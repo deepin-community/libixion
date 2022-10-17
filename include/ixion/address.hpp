@@ -8,7 +8,7 @@
 #ifndef INCLUDED_IXION_ADDRESS_HPP
 #define INCLUDED_IXION_ADDRESS_HPP
 
-#include "ixion/global.hpp"
+#include "types.hpp"
 
 #include <string>
 #include <vector>
@@ -130,8 +130,8 @@ IXION_DLLPUBLIC bool operator!=(const abs_rc_address_t& left, const abs_rc_addre
 IXION_DLLPUBLIC bool operator<(const abs_rc_address_t& left, const abs_rc_address_t& right);
 
 /**
- * Stores either absolute or relative address, but unlike the {@link
- * address_t} counterpart, this struct only stores row and column positions.
+ * Stores either absolute or relative address, but unlike the address_t
+ * counterpart, this struct only stores row and column positions.
  */
 struct IXION_DLLPUBLIC rc_address_t
 {

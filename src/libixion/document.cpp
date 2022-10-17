@@ -26,18 +26,21 @@ abs_address_t to_address(
     {
         case document::cell_pos::cp_type::string:
         {
-            formula_name_t name = resolver.resolve(pos.value.str, pos.value.n, abs_address_t());
+            std::string_view s = std::get<std::string_view>(pos.value);
+            formula_name_t name = resolver.resolve(s, abs_address_t());
             if (name.type != formula_name_t::cell_reference)
             {
                 std::ostringstream os;
-                os << "invalid cell address: " << std::string(pos.value.str, pos.value.n);
+                os << "invalid cell address: " << s;
                 throw std::invalid_argument(os.str());
             }
 
-            return to_address(name.address).to_abs(abs_address_t());
+            return std::get<address_t>(name.value).to_abs(abs_address_t());
         }
         case document::cell_pos::cp_type::address:
-            return abs_address_t(pos.value.sheet, pos.value.row, pos.value.column);
+        {
+            return std::get<abs_address_t>(pos.value);
+        }
     }
 
     throw std::logic_error("unrecognized cell position type.");
@@ -46,32 +49,27 @@ abs_address_t to_address(
 } // anonymous namespace
 
 document::cell_pos::cell_pos(const char* p) :
-    type(cp_type::string)
+    type(cp_type::string),
+    value(p)
 {
-    value.str = p;
-    value.n = std::strlen(p);
 }
 
 document::cell_pos::cell_pos(const char* p, size_t n) :
-    type(cp_type::string)
+    type(cp_type::string),
+    value(std::string_view(p, n))
 {
-    value.str = p;
-    value.n = n;
 }
 
 document::cell_pos::cell_pos(const std::string& s) :
-    type(cp_type::string)
+    type(cp_type::string),
+    value(s)
 {
-    value.str = s.data();
-    value.n = s.size();
 }
 
 document::cell_pos::cell_pos(const abs_address_t& addr) :
-    type(cp_type::address)
+    type(cp_type::address),
+    value(addr)
 {
-    value.sheet = addr.sheet;
-    value.row = addr.row;
-    value.column = addr.column;
 }
 
 struct document::impl
@@ -111,19 +109,11 @@ struct document::impl
         modified_cells.insert(addr);
     }
 
-    void set_string_cell(cell_pos pos, const char* p, size_t n)
+    void set_string_cell(cell_pos pos, std::string_view s)
     {
         abs_address_t addr = to_address(cxt, *resolver, pos);
         unregister_formula_cell(cxt, addr);
-        cxt.set_string_cell(addr, p, n);
-        modified_cells.insert(addr);
-    }
-
-    void set_string_cell(cell_pos pos, const std::string& s)
-    {
-        abs_address_t addr = to_address(cxt, *resolver, pos);
-        unregister_formula_cell(cxt, addr);
-        cxt.set_string_cell(addr, s.data(), s.size());
+        cxt.set_string_cell(addr, s);
         modified_cells.insert(addr);
     }
 
@@ -149,17 +139,17 @@ struct document::impl
         return cxt.get_numeric_value(addr);
     }
 
-    const std::string* get_string_value(cell_pos pos) const
+    std::string_view get_string_value(cell_pos pos) const
     {
         abs_address_t addr = to_address(cxt, *resolver, pos);
         return cxt.get_string_value(addr);
     }
 
-    void set_formula_cell(cell_pos pos, const std::string& formula)
+    void set_formula_cell(cell_pos pos, std::string_view formula)
     {
         abs_address_t addr = to_address(cxt, *resolver, pos);
         unregister_formula_cell(cxt, addr);
-        auto tokens = parse_formula_string(cxt, addr, *resolver, formula.data(), formula.size());
+        auto tokens = parse_formula_string(cxt, addr, *resolver, formula);
         formula_cell* fc = cxt.set_formula_cell(addr, std::move(tokens));
         register_formula_cell(cxt, addr, fc);
         modified_formula_cells.insert(addr);
@@ -175,10 +165,10 @@ struct document::impl
 };
 
 document::document() :
-    mp_impl(ixion::make_unique<impl>()) {}
+    mp_impl(std::make_unique<impl>()) {}
 
 document::document(formula_name_resolver_t cell_address_type) :
-    mp_impl(ixion::make_unique<impl>(cell_address_type)) {}
+    mp_impl(std::make_unique<impl>(cell_address_type)) {}
 
 document::~document() {}
 
@@ -197,12 +187,7 @@ void document::set_numeric_cell(cell_pos pos, double val)
     mp_impl->set_numeric_cell(pos, val);
 }
 
-void document::set_string_cell(cell_pos pos, const char* p, size_t n)
-{
-    mp_impl->set_string_cell(pos, p, n);
-}
-
-void document::set_string_cell(cell_pos pos, const std::string& s)
+void document::set_string_cell(cell_pos pos, std::string_view s)
 {
     mp_impl->set_string_cell(pos, s);
 }
@@ -222,12 +207,12 @@ double document::get_numeric_value(cell_pos pos) const
     return mp_impl->get_numeric_value(pos);
 }
 
-const std::string* document::get_string_value(cell_pos pos) const
+std::string_view document::get_string_value(cell_pos pos) const
 {
     return mp_impl->get_string_value(pos);
 }
 
-void document::set_formula_cell(cell_pos pos, const std::string& formula)
+void document::set_formula_cell(cell_pos pos, std::string_view formula)
 {
     mp_impl->set_formula_cell(pos, formula);
 }

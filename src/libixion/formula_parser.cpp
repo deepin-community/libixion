@@ -151,44 +151,38 @@ void formula_parser::name(const lexer_token_base& t)
 {
     mem_str_buf name = t.get_string();
 
-    formula_name_t fn = m_resolver.resolve(name.get(), name.size(), m_pos);
+    formula_name_t fn = m_resolver.resolve({name.get(), name.size()}, m_pos);
 
     switch (fn.type)
     {
         case formula_name_t::cell_reference:
             m_formula_tokens.push_back(
-                make_unique<single_ref_token>(
-                    address_t(
-                        fn.address.sheet, fn.address.row, fn.address.col,
-                        fn.address.abs_sheet, fn.address.abs_row, fn.address.abs_col)));
-        break;
+                make_unique<single_ref_token>(std::get<address_t>(fn.value)));
+            break;
         case formula_name_t::range_reference:
         {
-            address_t first(fn.range.first.sheet, fn.range.first.row, fn.range.first.col,
-                            fn.range.first.abs_sheet, fn.range.first.abs_row, fn.range.first.abs_col);
-            address_t last(fn.range.last.sheet, fn.range.last.row, fn.range.last.col,
-                           fn.range.last.abs_sheet, fn.range.last.abs_row, fn.range.last.abs_col);
-            m_formula_tokens.push_back(make_unique<range_ref_token>(range_t(first, last)));
+            m_formula_tokens.push_back(
+                make_unique<range_ref_token>(std::get<range_t>(fn.value)));
+            break;
         }
-        break;
         case formula_name_t::table_reference:
         {
             table_t table;
-            table.name = m_context.add_string(fn.table.name, fn.table.name_length);
-            table.column_first = m_context.add_string(fn.table.column_first, fn.table.column_first_length);
-            table.column_last = m_context.add_string(fn.table.column_last, fn.table.column_last_length);
-            table.areas = fn.table.areas;
+            formula_name_t::table_type src_table = std::get<formula_name_t::table_type>(fn.value);
+            table.name = m_context.add_string(src_table.name);
+            table.column_first = m_context.add_string(src_table.column_first);
+            table.column_last = m_context.add_string(src_table.column_last);
+            table.areas = src_table.areas;
             m_formula_tokens.push_back(make_unique<table_ref_token>(table));
+            break;
         }
-        break;
         case formula_name_t::function:
-            m_formula_tokens.push_back(
-                make_unique<function_token>(static_cast<size_t>(fn.func_oc)));
-        break;
+            m_formula_tokens.push_back(make_unique<function_token>(std::get<formula_function_t>(fn.value)));
+            break;
         case formula_name_t::named_expression:
             m_formula_tokens.push_back(
                 make_unique<named_exp_token>(name.get(), name.size()));
-        break;
+            break;
         default:
         {
             std::ostringstream os;
@@ -201,7 +195,7 @@ void formula_parser::name(const lexer_token_base& t)
 void formula_parser::literal(const lexer_token_base& t)
 {
     mem_str_buf s = t.get_string();
-    string_id_t sid = m_context.add_string(s.get(), s.size());
+    string_id_t sid = m_context.add_string({s.get(), s.size()});
     m_formula_tokens.push_back(make_unique<string_token>(sid));
 }
 

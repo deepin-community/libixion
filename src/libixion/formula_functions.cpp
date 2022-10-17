@@ -7,10 +7,10 @@
 
 #include "formula_functions.hpp"
 #include "debug.hpp"
+#include "mem_str_buf.hpp"
 
 #include "ixion/formula_tokens.hpp"
 #include "ixion/matrix.hpp"
-#include "ixion/mem_str_buf.hpp"
 #include "ixion/interface/formula_model_access.hpp"
 #include "ixion/macros.hpp"
 
@@ -374,9 +374,9 @@ const map_type& get()
     return mt;
 }
 
-} // anonymous namespace
+} // builtin_funcs namespace
 
-const char* unknown_func_name = "unknown";
+std::string_view unknown_func_name = "unknown";
 
 /**
  * Traverse all elements of a passed matrix to sum up their values.
@@ -423,7 +423,7 @@ numeric_matrix multiply_matrices(const matrix& left, const matrix& right)
     return output;
 }
 
-}
+} // anonymous namespace
 
 // ============================================================================
 
@@ -433,17 +433,15 @@ formula_functions::invalid_arg::invalid_arg(const string& msg) :
 formula_function_t formula_functions::get_function_opcode(const formula_token& token)
 {
     assert(token.get_opcode() == fop_function);
-    return static_cast<formula_function_t>(token.get_index());
+    return static_cast<formula_function_t>(token.get_uint32());
 }
 
-formula_function_t formula_functions::get_function_opcode(const char* p, size_t n)
+formula_function_t formula_functions::get_function_opcode(std::string_view s)
 {
     std::string upper;
 
-    for (const char* p_end = p + n; p != p_end; ++p)
+    for (char c : s)
     {
-        char c = *p;
-
         if (c > 'Z')
         {
             // Convert to upper case.
@@ -456,7 +454,7 @@ formula_function_t formula_functions::get_function_opcode(const char* p, size_t 
     return builtin_funcs::get().find(upper.data(), upper.size());
 }
 
-const char* formula_functions::get_function_name(formula_function_t oc)
+std::string_view formula_functions::get_function_name(formula_function_t oc)
 {
     for (const builtin_funcs::map_type::entry& e : builtin_funcs::entries)
     {
@@ -479,20 +477,11 @@ void formula_functions::interpret(formula_function_t oc, formula_value_stack& ar
 {
     switch (oc)
     {
-        case formula_function_t::func_max:
-            fnc_max(args);
-            break;
         case formula_function_t::func_average:
             fnc_average(args);
             break;
-        case formula_function_t::func_min:
-            fnc_min(args);
-            break;
-        case formula_function_t::func_wait:
-            fnc_wait(args);
-            break;
-        case formula_function_t::func_sum:
-            fnc_sum(args);
+        case formula_function_t::func_concatenate:
+            fnc_concatenate(args);
             break;
         case formula_function_t::func_counta:
             fnc_counta(args);
@@ -500,26 +489,38 @@ void formula_functions::interpret(formula_function_t oc, formula_value_stack& ar
         case formula_function_t::func_if:
             fnc_if(args);
             break;
+        case formula_function_t::func_int:
+            fnc_int(args);
+            break;
+        case formula_function_t::func_left:
+            fnc_left(args);
+            break;
         case formula_function_t::func_len:
             fnc_len(args);
             break;
-        case formula_function_t::func_concatenate:
-            fnc_concatenate(args);
+        case formula_function_t::func_max:
+            fnc_max(args);
             break;
-        case formula_function_t::func_now:
-            fnc_now(args);
-            break;
-        case formula_function_t::func_subtotal:
-            fnc_subtotal(args);
+        case formula_function_t::func_min:
+            fnc_min(args);
             break;
         case formula_function_t::func_mmult:
             fnc_mmult(args);
             break;
+        case formula_function_t::func_now:
+            fnc_now(args);
+            break;
         case formula_function_t::func_pi:
             fnc_pi(args);
             break;
-        case formula_function_t::func_int:
-            fnc_int(args);
+        case formula_function_t::func_subtotal:
+            fnc_subtotal(args);
+            break;
+        case formula_function_t::func_sum:
+            fnc_sum(args);
+            break;
+        case formula_function_t::func_wait:
+            fnc_wait(args);
             break;
         case formula_function_t::func_unknown:
         default:
@@ -768,7 +769,7 @@ void formula_functions::fnc_len(formula_value_stack& args) const
     args.push_value(s.size());
 }
 
-void formula_functions::fnc_concatenate(formula_value_stack& args)
+void formula_functions::fnc_concatenate(formula_value_stack& args) const
 {
     string s;
     while (!args.empty())
@@ -776,14 +777,33 @@ void formula_functions::fnc_concatenate(formula_value_stack& args)
     args.push_string(std::move(s));
 }
 
+void formula_functions::fnc_left(formula_value_stack& args) const
+{
+    if (args.empty() || args.size() > 2)
+        throw formula_functions::invalid_arg(
+            "LEFT requires at least one argument but no more than 2.");
+
+    size_t n = 1; // when the 2nd arg is skipped, it defaults to 1.
+    if (args.size() == 2)
+        n = std::floor(args.pop_value());
+
+    string s = args.pop_string();
+
+    // Resize ONLY when the desired length is lower than the original string length.
+    if (n < s.size())
+        s.resize(n);
+
+    args.push_string(std::move(s));
+}
+
 void formula_functions::fnc_now(formula_value_stack& args) const
 {
     if (!args.empty())
-        throw formula_functions::invalid_arg("NOW takes no argument.");
+        throw formula_functions::invalid_arg("NOW takes no arguments.");
 
     // TODO: this value is currently not accurate since we don't take into
     // account the zero date yet.
-    double cur_time = global::get_current_time();
+    double cur_time = get_current_time();
     cur_time /= 86400.0; // convert seconds to days.
     args.push_value(cur_time);
 }

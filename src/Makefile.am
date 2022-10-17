@@ -11,6 +11,8 @@ ixion_parser_SOURCES = \
 	ixion_parser.cpp \
 	model_parser.hpp \
 	model_parser.cpp \
+	app_common.hpp \
+	app_common.cpp \
 	session_handler.hpp \
 	session_handler.cpp \
 	table_handler.hpp \
@@ -21,6 +23,7 @@ ixion_parser_LDADD = libixion/libixion-@IXION_API_VERSION@.la \
 
 ixion_sorter_SOURCES = \
 	ixion_sorter.cpp \
+	app_common.cpp \
 	sort_input_parser.hpp \
 	sort_input_parser.cpp
 

@@ -3,4 +3,4 @@ usr/bin/ixion-parser
 usr/bin/ixion-sorter
 usr/lib/python*/site-packages/ixion.a
 usr/lib/python*/site-packages/ixion.la
-usr/lib/*/libixion-0.16.la
+usr/lib/*/libixion-0.17.la

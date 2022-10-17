@@ -6,6 +6,7 @@
  */
 
 #include "model_parser.hpp"
+#include "app_common.hpp"
 
 #include <string>
 #include <vector>
@@ -19,7 +20,7 @@ using namespace ixion;
 
 namespace {
 
-class parse_file : public unary_function<void, string>
+class parse_file
 {
     const size_t m_thread_count;
 public:
@@ -27,8 +28,8 @@ public:
 
     void operator() (const string& fpath) const
     {
-        double start_time = global::get_current_time();
-        cout << get_formula_result_output_separator() << endl;
+        double start_time = get_current_time();
+        cout << detail::get_formula_result_output_separator() << endl;
         cout << "parsing " << fpath << endl;
 
         try
@@ -43,9 +44,9 @@ public:
             throw;
         }
 
-        cout << get_formula_result_output_separator() << endl;
-        cout << "(duration: " << global::get_current_time() - start_time << " sec)" << endl;
-        cout << get_formula_result_output_separator() << endl;
+        cout << detail::get_formula_result_output_separator() << endl;
+        cout << "(duration: " << get_current_time() - start_time << " sec)" << endl;
+        cout << detail::get_formula_result_output_separator() << endl;
     }
 };
 
@@ -103,8 +104,6 @@ int main (int argc, char** argv)
             << desc;
         return EXIT_SUCCESS;
     }
-
-    ixion::init();
 
     if (vm.count("thread"))
         thread_count = vm["thread"].as<size_t>();

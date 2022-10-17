@@ -108,7 +108,7 @@ struct formula_cell::impl
             IXION_DEBUG("Circular dependency detected !!");
             assert(!m_calc_status->result);
             m_calc_status->result =
-                ixion::make_unique<formula_result>(formula_error_t::ref_result_not_available);
+                std::make_unique<formula_result>(formula_error_t::ref_result_not_available);
 
             return false;
         }
@@ -155,11 +155,11 @@ struct formula_cell::impl
                 switch (elem.type)
                 {
                     case matrix::element_type::numeric:
-                        return elem.numeric;
+                        return std::get<double>(elem.value);
                     case matrix::element_type::empty:
                         return 0.0;
                     case matrix::element_type::boolean:
-                        return elem.boolean ? 1.0 : 0.0;
+                        return std::get<bool>(elem.value) ? 1.0 : 0.0;
                     case matrix::element_type::string:
                     case matrix::element_type::error:
                     default:
@@ -179,14 +179,14 @@ struct formula_cell::impl
         }
     }
 
-    const std::string* fetch_string_from_result() const
+    std::string_view fetch_string_from_result() const
     {
         check_calc_status_or_throw();
 
         switch (m_calc_status->result->get_type())
         {
             case formula_result::result_type::string:
-                return &m_calc_status->result->get_string();
+                return m_calc_status->result->get_string();
             case formula_result::result_type::matrix:
             {
                 const matrix& m = m_calc_status->result->get_matrix();
@@ -201,7 +201,7 @@ struct formula_cell::impl
                 switch (elem.type)
                 {
                     case matrix::element_type::string:
-                        return elem.str;
+                        return std::get<std::string_view>(elem.value);
                     case matrix::element_type::numeric:
                     case matrix::element_type::empty:
                     case matrix::element_type::boolean:
@@ -222,7 +222,7 @@ struct formula_cell::impl
             }
         }
 
-        return nullptr;
+        return std::string_view{};
     }
 
     bool is_grouped() const
@@ -266,15 +266,18 @@ struct formula_cell::impl
         switch (elem.type)
         {
             case matrix::element_type::numeric:
-                return formula_result(elem.numeric);
+                return formula_result(std::get<double>(elem.value));
             case matrix::element_type::string:
-                return formula_result(*elem.str);
+            {
+                std::string s{std::get<std::string_view>(elem.value)};
+                return formula_result(std::move(s));
+            }
             case matrix::element_type::error:
-                return formula_result(elem.error);
+                return formula_result(std::get<formula_error_t>(elem.value));
             case matrix::element_type::empty:
                 return formula_result();
             case matrix::element_type::boolean:
-                return formula_result(elem.boolean ? 1.0 : 0.0);
+                return formula_result(std::get<bool>(elem.value) ? 1.0 : 0.0);
             default:
                 throw std::logic_error("unhandled element type of a matrix result value.");
         }
@@ -289,7 +292,7 @@ struct formula_cell::impl
             if (!m_calc_status->result)
             {
                 m_calc_status->result =
-                    ixion::make_unique<formula_result>(
+                    std::make_unique<formula_result>(
                         matrix(m_calc_status->group_size.row, m_calc_status->group_size.column));
             }
 
@@ -316,20 +319,20 @@ struct formula_cell::impl
         }
 
         std::unique_lock<std::mutex> lock(m_calc_status->mtx);
-        m_calc_status->result = ixion::make_unique<formula_result>(std::move(result));
+        m_calc_status->result = std::make_unique<formula_result>(std::move(result));
     }
 };
 
-formula_cell::formula_cell() : mp_impl(ixion::make_unique<impl>()) {}
+formula_cell::formula_cell() : mp_impl(std::make_unique<impl>()) {}
 
 formula_cell::formula_cell(const formula_tokens_store_ptr_t& tokens) :
-    mp_impl(ixion::make_unique<impl>(tokens)) {}
+    mp_impl(std::make_unique<impl>(tokens)) {}
 
 formula_cell::formula_cell(
     row_t group_row, col_t group_col,
     const calc_status_ptr_t& cs,
     const formula_tokens_store_ptr_t& tokens) :
-    mp_impl(ixion::make_unique<impl>(group_row, group_col, cs, tokens)) {}
+    mp_impl(std::make_unique<impl>(group_row, group_col, cs, tokens)) {}
 
 formula_cell::~formula_cell()
 {
@@ -353,7 +356,7 @@ double formula_cell::get_value(formula_result_wait_policy_t policy) const
     return mp_impl->fetch_value_from_result();
 }
 
-const std::string* formula_cell::get_string(formula_result_wait_policy_t policy) const
+std::string_view formula_cell::get_string(formula_result_wait_policy_t policy) const
 {
     std::unique_lock<std::mutex> lock(mp_impl->m_calc_status->mtx);
     if (policy == formula_result_wait_policy_t::block_until_done)
@@ -383,7 +386,7 @@ void formula_cell::interpret(iface::formula_model_access& context, const abs_add
                 if (handler)
                 {
                     handler->begin_cell_interpret(pos);
-                    const char* msg = get_formula_error_name(status.result->get_error());
+                    std::string_view msg = get_formula_error_name(status.result->get_error());
                     handler->set_formula_error(msg);
                     handler->end_cell_interpret();
                 }
@@ -393,7 +396,7 @@ void formula_cell::interpret(iface::formula_model_access& context, const abs_add
 
         formula_interpreter fin(this, context);
         fin.set_origin(pos);
-        status.result = ixion::make_unique<formula_result>();
+        status.result = std::make_unique<formula_result>();
         if (fin.interpret())
         {
             // Successful interpretation.

@@ -8,8 +8,8 @@
 #ifndef INCLUDED_IXION_CELL_HPP
 #define INCLUDED_IXION_CELL_HPP
 
-#include "ixion/types.hpp"
-#include "ixion/formula_tokens_fwd.hpp"
+#include "types.hpp"
+#include "formula_tokens_fwd.hpp"
 
 #include <memory>
 #include <vector>
@@ -55,7 +55,7 @@ public:
     void set_tokens(const formula_tokens_store_ptr_t& tokens);
 
     double get_value(formula_result_wait_policy_t policy) const;
-    const std::string* get_string(formula_result_wait_policy_t policy) const;
+    std::string_view get_string(formula_result_wait_policy_t policy) const;
 
     void interpret(iface::formula_model_access& context, const abs_address_t& pos);
 
@@ -85,14 +85,23 @@ public:
     std::vector<const formula_token*> get_ref_tokens(
         const iface::formula_model_access& cxt, const abs_address_t& pos) const;
 
+    /**
+     * Get the cached result without post-processing in case of a grouped
+     * formula cell.
+     *
+     * @param policy action to take in case the result is not yet available.
+     *
+     * @return formula result.
+     */
     const formula_result& get_raw_result_cache(formula_result_wait_policy_t policy) const;
 
     /**
      * Get the cached result as a single cell.  For a non-grouped formula
-     * cell, it should be identical to the value from the {@link
-     * get_raw_result_cache} call.  For a grouped formula cell, you'll get a
-     * single value assigned to the position of the cell in case the original
-     * result is a matrix value.
+     * cell, it should be identical to the value from the get_raw_result_cache()
+     * call.  For a grouped formula cell, you'll get a single value assigned to
+     * the position of the cell in case the original result is a matrix value.
+     *
+     * @param policy action to take in case the result is not yet available.
      *
      * @return formula result.
      */

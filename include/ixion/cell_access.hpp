@@ -8,7 +8,7 @@
 #ifndef INCLUDED_IXION_CELL_ACCESS_HPP
 #define INCLUDED_IXION_CELL_ACCESS_HPP
 
-#include "ixion/types.hpp"
+#include "types.hpp"
 
 #include <memory>
 #include <string>
@@ -26,7 +26,7 @@ struct abs_address_t;
  * queries to the same cell.
  *
  * Note that an instance of this class will get invalidated when the content
- * of {@link ixion::model_context} is modified.
+ * of ixion::model_context is modified.
  */
 class IXION_DLLPUBLIC cell_access
 {
@@ -53,7 +53,7 @@ public:
 
     bool get_boolean_value() const;
 
-    const std::string* get_string_value() const;
+    std::string_view get_string_value() const;
 
     string_id_t get_string_identifier() const;
 

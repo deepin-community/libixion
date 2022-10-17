@@ -181,9 +181,8 @@ void get_result_from_cell(const iface::formula_model_access& cxt, const abs_addr
             break;
         case celltype_t::string:
         {
-            const std::string* p = cxt.get_string_value(addr);
-            assert(p);
-            res.set_string_value(*p);
+            std::string_view s = cxt.get_string_value(addr);
+            res.set_string_value(std::string{s});
             break;
         }
         case celltype_t::unknown:
@@ -829,7 +828,7 @@ void formula_interpreter::constant()
 
 void formula_interpreter::literal()
 {
-    size_t sid = token().get_index();
+    string_id_t sid = token().get_uint32();
     const std::string* p = m_context.get_string(sid);
     if (!p)
         throw general_error("no string found for the specified string ID.");

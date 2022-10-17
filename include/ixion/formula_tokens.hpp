@@ -8,10 +8,10 @@
 #ifndef INCLUDED_FORMULA_TOKENS_HPP
 #define INCLUDED_FORMULA_TOKENS_HPP
 
-#include "ixion/address.hpp"
-#include "ixion/table.hpp"
-#include "ixion/formula_opcode.hpp"
-#include "ixion/formula_tokens_fwd.hpp"
+#include "address.hpp"
+#include "table.hpp"
+#include "formula_opcode.hpp"
+#include "formula_tokens_fwd.hpp"
 
 #include <string>
 
@@ -25,7 +25,7 @@ namespace ixion {
  *
  * @return printable name for a formula opcode.
  */
-IXION_DLLPUBLIC const char* get_opcode_name(fopcode_t oc);
+IXION_DLLPUBLIC std::string_view get_opcode_name(fopcode_t oc);
 
 /**
  * Get the string representation of a simple formula opcode.  This function
@@ -35,7 +35,7 @@ IXION_DLLPUBLIC const char* get_opcode_name(fopcode_t oc);
  *
  * @return string representation of a formula opcode.
  */
-IXION_DLLPUBLIC const char* get_formula_opcode_string(fopcode_t oc);
+IXION_DLLPUBLIC std::string_view get_formula_opcode_string(fopcode_t oc);
 
 class IXION_DLLPUBLIC formula_token
 {
@@ -57,7 +57,7 @@ public:
     virtual range_t get_range_ref() const;
     virtual table_t get_table_ref() const;
     virtual double get_value() const;
-    virtual size_t get_index() const;
+    virtual uint32_t get_uint32() const;
     virtual std::string get_name() const;
     virtual void write_string(std::ostream& os) const;
 };
