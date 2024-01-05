@@ -62,6 +62,7 @@ public:
      */
     bool is_numeric() const;
 
+    bool get_boolean(size_t row, size_t col) const;
     bool is_numeric(size_t row, size_t col) const;
     double get_numeric(size_t row, size_t col) const;
     void set(size_t row, size_t col, double val);
@@ -92,6 +93,14 @@ class IXION_DLLPUBLIC numeric_matrix
 public:
     numeric_matrix();
     numeric_matrix(size_t rows, size_t cols);
+
+    /**
+     * Constructor with initial values.
+     *
+     * @param array  Array of initial values stored in column-major order.
+     * @param rows Number of rows.
+     * @param cols Number of columns.
+     */
     numeric_matrix(std::vector<double> array, size_t rows, size_t cols);
     numeric_matrix(numeric_matrix&& r);
     ~numeric_matrix();

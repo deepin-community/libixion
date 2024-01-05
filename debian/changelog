@@ -1,3 +1,61 @@
+libixion (0.19.0-4) unstable; urgency=medium
+
+  * upload to unstable 
+
+ -- Rene Engelhard <rene@debian.org>  Fri, 24 Nov 2023 17:44:05 +0100
+
+libixion (0.19.0-3) experimental; urgency=medium
+
+  * use dh_makeshlibs -VUpstream-Version to bump .shlibs to >= 0.19.0,
+    liborcus-spreadsheet-model 0.19.x needs it
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 29 Oct 2023 13:06:49 +0100
+
+libixion (0.19.0-2) experimental; urgency=medium
+
+  * debian/rules: export DEB_CXXFLAGS_MAINT_APPEND += -fexcess-precision=fast
+    thanks Adrian Bunk (closes: #1054239)
+
+ -- Rene Engelhard <rene@debian.org>  Sun, 22 Oct 2023 11:22:48 +0200
+
+libixion (0.19.0-1) experimental; urgency=medium
+
+  * New upstream version 0.19.0
+
+  * debian/clean: add missing / and remove manual rm -rfs
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 03 Oct 2023 14:40:03 +0200
+
+libixion (0.18.1-2) experimental; urgency=medium
+
+  * Update tests/control: 0.17->0.18 
+
+ -- Rene Engelhard <rene@debian.org>  Tue, 20 Jun 2023 17:37:22 +0200
+
+libixion (0.18.1-1) experimental; urgency=medium
+
+  * New upstream version 0.18.1
+
+ -- Rene Engelhard <rene@debian.org>  Wed, 01 Feb 2023 17:58:50 +0100
+
+libixion (0.18.0-3) experimental; urgency=medium
+
+  * add fix from upstream to fix build on 32 bit 
+
+ -- Rene Engelhard <rene@debian.org>  Sat, 28 Jan 2023 08:38:41 +0100
+
+libixion (0.18.0-2) experimental; urgency=medium
+
+  * oops, don't hardcode x86_64-linux-gnu in rm
+
+ -- Rene Engelhard <rene@debian.org>  Fri, 27 Jan 2023 16:17:09 +0100
+
+libixion (0.18.0-1) experimental; urgency=medium
+
+  * New upstream version 0.18.0
+
+ -- Rene Engelhard <rene@debian.org>  Fri, 13 Jan 2023 19:05:36 +0100
+
 libixion (0.17.0-3) unstable; urgency=medium
 
   * upload to unstable 

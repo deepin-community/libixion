@@ -5,10 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/model_context.hpp"
-#include "ixion/macros.hpp"
-#include "ixion/formula_name_resolver.hpp"
-#include "ixion/formula.hpp"
+#include "test_global.hpp" // This must be the first header to be included.
+
+#include <ixion/model_context.hpp>
+#include <ixion/macros.hpp>
+#include <ixion/formula_name_resolver.hpp>
+#include <ixion/formula.hpp>
 
 #include <cassert>
 #include <iostream>
@@ -18,6 +20,8 @@ using namespace std;
 
 void test_single_cell_dependency()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     model_context cxt{{400, 200}};
     cxt.append_sheet("One");
 
@@ -55,6 +59,8 @@ void test_single_cell_dependency()
 
 void test_range_dependency()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     model_context cxt{{400, 200}};
     cxt.append_sheet("One");
 
@@ -95,6 +101,8 @@ void test_range_dependency()
 
 void test_matrix_dependency()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     model_context cxt{{400, 200}};
     cxt.append_sheet("One");
 

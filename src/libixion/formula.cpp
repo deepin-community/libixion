@@ -5,18 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/formula.hpp"
-#include "ixion/formula_name_resolver.hpp"
-#include "ixion/formula_function_opcode.hpp"
-#include "ixion/cell.hpp"
-#include "ixion/dirty_cell_tracker.hpp"
-#include "ixion/types.hpp"
+#include <ixion/formula.hpp>
+#include <ixion/formula_name_resolver.hpp>
+#include <ixion/formula_function_opcode.hpp>
+#include <ixion/cell.hpp>
+#include <ixion/dirty_cell_tracker.hpp>
+#include <ixion/types.hpp>
+#include <ixion/model_context.hpp>
 
 #include "formula_lexer.hpp"
 #include "formula_parser.hpp"
 #include "formula_functions.hpp"
 #include "debug.hpp"
-#include "concrete_formula_tokens.hpp"
 
 #include <sstream>
 #include <algorithm>
@@ -27,13 +27,13 @@ namespace {
 
 #if IXION_LOGGING
 
-std::string debug_print_formula_tokens(const formula_tokens_t& tokens)
+[[maybe_unused]] std::string debug_print_formula_tokens(const formula_tokens_t& tokens)
 {
     std::ostringstream os;
 
-    for (const std::unique_ptr<formula_token>& t : tokens)
+    for (const formula_token& t : tokens)
     {
-        os << std::endl << "  * " << *t;
+        os << std::endl << "  * " << t;
     }
 
     return os.str();
@@ -41,10 +41,143 @@ std::string debug_print_formula_tokens(const formula_tokens_t& tokens)
 
 #endif
 
+void print_token(
+    const print_config& config, const model_context& cxt, const abs_address_t& pos,
+    const formula_name_resolver& resolver, const formula_token& token, std::ostream& os)
+{
+    auto sheet_to_print = [&config, &pos](const address_t& ref_addr) -> bool
+    {
+        switch (config.display_sheet)
+        {
+            case display_sheet_t::always:
+                return true;
+            case display_sheet_t::never:
+                return false;
+            case display_sheet_t::only_if_different:
+                return ref_addr.to_abs(pos).sheet != pos.sheet;
+            case display_sheet_t::unspecified:
+                break;
+        }
+        return false;
+    };
+
+    switch (token.opcode)
+    {
+        case fop_array_open:
+            os << '{';
+            break;
+        case fop_array_close:
+            os << '}';
+            break;
+        case fop_close:
+            os << ')';
+            break;
+        case fop_divide:
+            os << '/';
+            break;
+        case fop_minus:
+            os << '-';
+            break;
+        case fop_multiply:
+            os << '*';
+            break;
+        case fop_exponent:
+            os << '^';
+            break;
+        case fop_concat:
+            os << '&';
+            break;
+        case fop_open:
+            os << '(';
+            break;
+        case fop_plus:
+            os << '+';
+            break;
+        case fop_value:
+            os << std::get<double>(token.value);
+            break;
+        case fop_sep:
+            os << cxt.get_config().sep_function_arg;
+            break;
+        case fop_array_row_sep:
+            os << cxt.get_config().sep_matrix_row;
+            break;
+        case fop_function:
+        {
+            auto fop = std::get<formula_function_t>(token.value);
+            os << formula_functions::get_function_name(fop);
+            break;
+        }
+        case fop_single_ref:
+        {
+            const address_t& addr = std::get<address_t>(token.value);
+            bool sheet_name = sheet_to_print(addr);
+            os << resolver.get_name(addr, pos, sheet_name);
+            break;
+        }
+        case fop_range_ref:
+        {
+            const range_t& range = std::get<range_t>(token.value);
+            bool sheet_name = sheet_to_print(range.first);
+            os << resolver.get_name(range, pos, sheet_name);
+            break;
+        }
+        case fop_table_ref:
+        {
+            const table_t& tbl = std::get<table_t>(token.value);
+            os << resolver.get_name(tbl);
+            break;
+        }
+        case fop_string:
+        {
+            auto sid = std::get<string_id_t>(token.value);
+            const std::string* p = cxt.get_string(sid);
+            if (p)
+                os << "\"" << *p << "\"";
+            else
+                IXION_DEBUG("failed to get a string value for the identifier value of " << sid);
+
+            break;
+        }
+        case fop_equal:
+            os << "=";
+            break;
+        case fop_not_equal:
+            os << "<>";
+            break;
+        case fop_less:
+            os << "<";
+            break;
+        case fop_greater:
+            os << ">";
+            break;
+        case fop_less_equal:
+            os << "<=";
+            break;
+        case fop_greater_equal:
+            os << ">=";
+            break;
+        case fop_named_expression:
+            os << std::get<std::string>(token.value);
+            break;
+        case fop_unknown:
+        default:
+        {
+            std::ostringstream repr;
+            repr << token;
+            IXION_DEBUG(
+                "token not printed (repr='" << repr.str()
+                << "'; name='" << get_opcode_name(token.opcode)
+                << "'; opcode='" << get_formula_opcode_string(token.opcode)
+                << "')");
+        }
+    }
+}
+
 }
 
 formula_tokens_t parse_formula_string(
-    iface::formula_model_access& cxt, const abs_address_t& pos,
+    model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, std::string_view formula)
 {
     IXION_TRACE("pos=" << pos.get_name() << "; formula='" << formula << "'");
@@ -53,7 +186,7 @@ formula_tokens_t parse_formula_string(
     lexer.tokenize();
     lexer.swap_tokens(lxr_tokens);
 
-    IXION_TRACE(print_tokens(lxr_tokens, true));
+    IXION_TRACE("lexer tokens: " << print_tokens(lxr_tokens, true));
 
     formula_tokens_t tokens;
     formula_parser parser(lxr_tokens, cxt, resolver);
@@ -68,172 +201,62 @@ formula_tokens_t parse_formula_string(
 }
 
 formula_tokens_t create_formula_error_tokens(
-    iface::formula_model_access& cxt, std::string_view src_formula,
+    model_context& cxt, std::string_view src_formula,
     std::string_view error)
 {
     formula_tokens_t tokens;
-    tokens.push_back(std::make_unique<error_token>(2));
+    tokens.emplace_back(fop_error);
+    tokens.back().value = 2u;
 
     string_id_t sid_src_formula = cxt.add_string(src_formula);
-    tokens.push_back(std::make_unique<string_token>(sid_src_formula));
+    tokens.emplace_back(sid_src_formula);
 
     string_id_t sid_error = cxt.add_string(error);
-    tokens.push_back(std::make_unique<string_token>(sid_error));
+    tokens.emplace_back(sid_error);
 
     return tokens;
 }
 
-namespace {
-
-class func_print_formula_token
+std::string print_formula_tokens(
+    const model_context& cxt, const abs_address_t& pos,
+    const formula_name_resolver& resolver, const formula_tokens_t& tokens)
 {
-    const iface::formula_model_access& m_cxt;
-    const abs_address_t& m_pos;
-    const formula_name_resolver& m_resolver;
-    std::ostringstream& m_os;
-public:
-    func_print_formula_token(
-        const iface::formula_model_access& cxt, const abs_address_t& pos,
-        const formula_name_resolver& resolver, std::ostringstream& os) :
-        m_cxt(cxt),
-        m_pos(pos),
-        m_resolver(resolver),
-        m_os(os) {}
-
-    void operator() (const formula_tokens_t::value_type& token)
-    {
-        operator() (*token);
-    }
-
-    void operator() (const formula_token& token)
-    {
-        switch (token.get_opcode())
-        {
-            case fop_close:
-                m_os << ')';
-                break;
-            case fop_divide:
-                m_os << '/';
-                break;
-            case fop_minus:
-                m_os << '-';
-                break;
-            case fop_multiply:
-                m_os << '*';
-                break;
-            case fop_exponent:
-                m_os << '^';
-                break;
-            case fop_concat:
-                m_os << '&';
-                break;
-            case fop_open:
-                m_os << '(';
-                break;
-            case fop_plus:
-                m_os << '+';
-                break;
-            case fop_value:
-                m_os << token.get_value();
-                break;
-            case fop_sep:
-                m_os << m_cxt.get_config().sep_function_arg;
-                break;
-            case fop_function:
-            {
-                formula_function_t fop = static_cast<formula_function_t>(token.get_uint32());
-                m_os << formula_functions::get_function_name(fop);
-                break;
-            }
-            case fop_single_ref:
-            {
-                address_t addr = token.get_single_ref();
-                bool sheet_name = addr.to_abs(m_pos).sheet != m_pos.sheet;
-                m_os << m_resolver.get_name(addr, m_pos, sheet_name);
-                break;
-            }
-            case fop_range_ref:
-            {
-                range_t range = token.get_range_ref();
-                bool sheet_name = range.to_abs(m_pos).first.sheet != m_pos.sheet;
-                m_os << m_resolver.get_name(range, m_pos, sheet_name);
-                break;
-            }
-            case fop_table_ref:
-            {
-                table_t tbl = token.get_table_ref();
-                m_os << m_resolver.get_name(tbl);
-                break;
-            }
-            case fop_string:
-            {
-                const std::string* p = m_cxt.get_string(token.get_uint32());
-                if (p)
-                    m_os << "\"" << *p << "\"";
-                else
-                    IXION_DEBUG("failed to get a string value for the identifier value of " << token.get_uint32());
-
-                break;
-            }
-            case fop_equal:
-                m_os << "=";
-                break;
-            case fop_not_equal:
-                m_os << "<>";
-                break;
-            case fop_less:
-                m_os << "<";
-                break;
-            case fop_greater:
-                m_os << ">";
-                break;
-            case fop_less_equal:
-                m_os << "<=";
-                break;
-            case fop_greater_equal:
-                m_os << ">=";
-                break;
-            case fop_named_expression:
-                m_os << token.get_name();
-                break;
-            case fop_unknown:
-            default:
-            {
-                std::ostringstream repr;
-                token.write_string(repr);
-                IXION_DEBUG(
-                    "token not printed (repr='" << repr.str()
-                    << "'; name='" << get_opcode_name(token.get_opcode())
-                    << "'; opcode='" << get_formula_opcode_string(token.get_opcode())
-                    << "')");
-            }
-        }
-    }
-};
-
+    print_config config;
+    config.display_sheet = display_sheet_t::only_if_different;
+    return print_formula_tokens(config, cxt, pos, resolver, tokens);
 }
 
 std::string print_formula_tokens(
-    const iface::formula_model_access& cxt, const abs_address_t& pos,
+    const print_config& config, const model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, const formula_tokens_t& tokens)
 {
     std::ostringstream os;
 
-    if (!tokens.empty() && tokens[0]->get_opcode() == fop_error)
+    if (!tokens.empty() && tokens[0].opcode == fop_error)
         // Let's not print anything on error tokens.
         return std::string();
 
-    std::for_each(tokens.begin(), tokens.end(), func_print_formula_token(cxt, pos, resolver, os));
+    for (const formula_token& token : tokens)
+        print_token(config, cxt, pos, resolver, token, os);
+
     return os.str();
 }
 
 std::string print_formula_token(
-    const iface::formula_model_access& cxt, const abs_address_t& pos,
+    const model_context& cxt, const abs_address_t& pos,
+    const formula_name_resolver& resolver, const formula_token& token)
+{
+    print_config config;
+    config.display_sheet = display_sheet_t::only_if_different;
+    return print_formula_token(config, cxt, pos, resolver, token);
+}
+
+std::string print_formula_token(
+    const print_config& config, const model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, const formula_token& token)
 {
     std::ostringstream os;
-    func_print_formula_token func(cxt, pos, resolver, os);
-    func(token);
+    print_token(config, cxt, pos, resolver, token, os);
     return os.str();
 }
 
@@ -253,21 +276,19 @@ bool is_volatile(formula_function_t func)
 
 bool has_volatile(const formula_tokens_t& tokens)
 {
-    formula_tokens_t::const_iterator i = tokens.begin(), iend = tokens.end();
-    for (; i != iend; ++i)
+    for (const auto& t : tokens)
     {
-        const formula_token& t = **i;
-        if (t.get_opcode() != fop_function)
+        if (t.opcode != fop_function)
             continue;
 
-        formula_function_t func = static_cast<formula_function_t>(t.get_uint32());
+        auto func = std::get<formula_function_t>(t.value);
         if (is_volatile(func))
             return true;
     }
     return false;
 }
 
-void check_sheet_or_throw(const char* func_name, sheet_t sheet, const iface::formula_model_access& cxt, const abs_address_t& pos, const formula_cell& cell)
+void check_sheet_or_throw(const char* func_name, sheet_t sheet, const model_context& cxt, const abs_address_t& pos, const formula_cell& cell)
 {
     if (is_valid_sheet(sheet))
         return;
@@ -286,7 +307,7 @@ void check_sheet_or_throw(const char* func_name, sheet_t sheet, const iface::for
 }
 
 void register_formula_cell(
-    iface::formula_model_access& cxt, const abs_address_t& pos, const formula_cell* cell)
+    model_context& cxt, const abs_address_t& pos, const formula_cell* cell)
 {
 #ifdef IXION_DEBUG_UTILS
     if (cell)
@@ -329,18 +350,18 @@ void register_formula_cell(
     {
         IXION_TRACE("ref token: " << detail::print_formula_token_repr(*p));
 
-        switch (p->get_opcode())
+        switch (p->opcode)
         {
             case fop_single_ref:
             {
-                abs_address_t addr = p->get_single_ref().to_abs(pos);
+                abs_address_t addr = std::get<address_t>(p->value).to_abs(pos);
                 check_sheet_or_throw("register_formula_cell", addr.sheet, cxt, pos, *cell);
                 tracker.add(src_pos, addr);
                 break;
             }
             case fop_range_ref:
             {
-                abs_range_t range = p->get_range_ref().to_abs(pos);
+                abs_range_t range = std::get<range_t>(p->value).to_abs(pos);
                 check_sheet_or_throw("register_formula_cell", range.first.sheet, cxt, pos, *cell);
                 rc_size_t sheet_size = cxt.get_sheet_size();
                 if (range.all_columns())
@@ -368,7 +389,7 @@ void register_formula_cell(
         tracker.add_volatile(pos);
 }
 
-void unregister_formula_cell(iface::formula_model_access& cxt, const abs_address_t& pos)
+void unregister_formula_cell(model_context& cxt, const abs_address_t& pos)
 {
     // When there is a formula cell at this position, unregister it from
     // the dependency tree.
@@ -388,18 +409,18 @@ void unregister_formula_cell(iface::formula_model_access& cxt, const abs_address
     for (const formula_token* p : ref_tokens)
     {
 
-        switch (p->get_opcode())
+        switch (p->opcode)
         {
             case fop_single_ref:
             {
-                abs_address_t addr = p->get_single_ref().to_abs(pos);
+                abs_address_t addr = std::get<address_t>(p->value).to_abs(pos);
                 check_sheet_or_throw("unregister_formula_cell", addr.sheet, cxt, pos, *fcell);
                 tracker.remove(pos, addr);
                 break;
             }
             case fop_range_ref:
             {
-                abs_range_t range = p->get_range_ref().to_abs(pos);
+                abs_range_t range = std::get<range_t>(p->value).to_abs(pos);
                 check_sheet_or_throw("unregister_formula_cell", range.first.sheet, cxt, pos, *fcell);
                 tracker.remove(pos, range);
                 break;
@@ -410,7 +431,7 @@ void unregister_formula_cell(iface::formula_model_access& cxt, const abs_address
     }
 }
 
-abs_address_set_t query_dirty_cells(iface::formula_model_access& cxt, const abs_address_set_t& modified_cells)
+abs_address_set_t query_dirty_cells(model_context& cxt, const abs_address_set_t& modified_cells)
 {
     abs_range_set_t modified_ranges;
     for (const abs_address_t& mc : modified_cells)
@@ -431,7 +452,7 @@ abs_address_set_t query_dirty_cells(iface::formula_model_access& cxt, const abs_
 }
 
 std::vector<abs_range_t> query_and_sort_dirty_cells(
-    iface::formula_model_access& cxt, const abs_range_set_t& modified_cells,
+    model_context& cxt, const abs_range_set_t& modified_cells,
     const abs_range_set_t* dirty_formula_cells)
 {
     const dirty_cell_tracker& tracker = cxt.get_cell_tracker();

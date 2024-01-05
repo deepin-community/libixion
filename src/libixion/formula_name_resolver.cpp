@@ -5,13 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/formula_name_resolver.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/table.hpp"
+#include <ixion/formula_name_resolver.hpp>
+#include <ixion/table.hpp>
 
 #include "formula_functions.hpp"
 #include "debug.hpp"
-#include "mem_str_buf.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -20,14 +18,13 @@
 #include <limits>
 #include <algorithm>
 #include <cctype>
-
-using namespace std;
+#include <optional>
 
 namespace ixion {
 
 namespace {
 
-bool check_address_by_sheet_bounds(const iface::formula_model_access* cxt, const address_t& pos)
+bool check_address_by_sheet_bounds(const model_context* cxt, const address_t& pos)
 {
     rc_size_t ss(row_upper_bound, column_upper_bound);
 
@@ -82,14 +79,14 @@ bool resolve_function(const char* p, size_t n, formula_name_t& ret)
  * <li>#All</li>
  * </ul>
  */
-bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t n, formula_name_t& ret)
+bool resolve_table(const model_context* cxt, const char* p, size_t n, formula_name_t& ret)
 {
     if (!cxt)
         return false;
 
     short scope = 0;
     size_t last_column_pos = std::numeric_limits<size_t>::max();
-    mem_str_buf buf;
+    std::string_view buf;
     std::string_view table_name;
     std::vector<std::string_view> names;
 
@@ -111,8 +108,8 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
                     if (scope != 0)
                         return false;
 
-                    table_name = { buf.get(), buf.size() };
-                    buf.clear();
+                    table_name = buf;
+                    buf = std::string_view{};
                 }
 
                 ++scope;
@@ -126,8 +123,8 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
 
                 if (!buf.empty())
                 {
-                    names.emplace_back(buf.get(), buf.size());
-                    buf.clear();
+                    names.push_back(buf);
+                    buf = std::string_view{};
                 }
 
                 --scope;
@@ -156,9 +153,9 @@ bool resolve_table(const iface::formula_model_access* cxt, const char* p, size_t
             break;
             default:
                 if (buf.empty())
-                    buf.set_start(p);
+                    buf = std::string_view{p, 1u};
                 else
-                    buf.inc();
+                    buf = std::string_view{buf.data(), buf.size() + 1u};
         }
     }
 
@@ -246,7 +243,7 @@ void set_cell_reference(formula_name_t& ret, const address_t& addr)
 
 enum class resolver_parse_mode { column, row };
 
-void append_sheet_name(ostringstream& os, const ixion::iface::formula_model_access& cxt, sheet_t sheet)
+void append_sheet_name(std::ostringstream& os, const ixion::model_context& cxt, sheet_t sheet)
 {
     if (!is_valid_sheet(sheet))
     {
@@ -254,8 +251,8 @@ void append_sheet_name(ostringstream& os, const ixion::iface::formula_model_acce
         return;
     }
 
-    string sheet_name = cxt.get_sheet_name(sheet);
-    string buffer; // used only when the sheet name contains at least one single quote.
+    std::string sheet_name = cxt.get_sheet_name(sheet);
+    std::string buffer; // used only when the sheet name contains at least one single quote.
 
     const char* p = sheet_name.data();
     const char* p_end = p + sheet_name.size();
@@ -271,11 +268,12 @@ void append_sheet_name(ostringstream& os, const ixion::iface::formula_model_acce
         switch (*p)
         {
             case ' ':
+            case '"':
                 quote = true;
             break;
             case '\'':
                 quote = true;
-                buffer += string(p0, p-p0);
+                buffer += std::string(p0, p-p0);
                 buffer.push_back(*p);
                 buffer.push_back(*p);
                 p0 = nullptr;
@@ -291,7 +289,7 @@ void append_sheet_name(ostringstream& os, const ixion::iface::formula_model_acce
     else
     {
         if (p0)
-            buffer += string(p0, p-p0);
+            buffer += std::string(p0, p-p0);
         os << buffer;
     }
 
@@ -300,7 +298,7 @@ void append_sheet_name(ostringstream& os, const ixion::iface::formula_model_acce
 }
 
 void append_sheet_name_calc_a1(
-    std::ostringstream& os, const ixion::iface::formula_model_access* cxt, const address_t& addr, const abs_address_t& origin)
+    std::ostringstream& os, const ixion::model_context* cxt, const address_t& addr, const abs_address_t& origin)
 {
     if (!cxt)
         return;
@@ -315,7 +313,7 @@ void append_sheet_name_calc_a1(
 }
 
 void append_sheet_name_odf_cra(
-    std::ostringstream& os, const ixion::iface::formula_model_access* cxt, const address_t& addr, const abs_address_t& origin)
+    std::ostringstream& os, const ixion::model_context* cxt, const address_t& addr, const abs_address_t& origin)
 {
     if (cxt)
     {
@@ -329,10 +327,10 @@ void append_sheet_name_odf_cra(
     os << '.';
 }
 
-void append_column_name_a1(ostringstream& os, col_t col)
+void append_column_name_a1(std::ostringstream& os, col_t col)
 {
     const col_t div = 26;
-    string col_name;
+    std::string col_name;
     while (true)
     {
         col_t rem = col % div;
@@ -377,7 +375,7 @@ void append_row_address_a1(std::ostringstream& os, row_t row, row_t origin, bool
 }
 
 void append_address_a1(
-    std::ostringstream& os, const ixion::iface::formula_model_access* cxt,
+    std::ostringstream& os, const ixion::model_context* cxt,
     const address_t& addr, const abs_address_t& pos, char sheet_name_sep)
 {
     assert(sheet_name_sep);
@@ -412,7 +410,7 @@ void append_address_a1(
  * separator even if a sheet name is not appended.
  */
 void append_address_a1_with_sheet_name_sep(
-    std::ostringstream& os, const ixion::iface::formula_model_access* cxt,
+    std::ostringstream& os, const ixion::model_context* cxt,
     const address_t& addr, const abs_address_t& pos, char sheet_name_sep)
 {
     if (!cxt)
@@ -422,7 +420,7 @@ void append_address_a1_with_sheet_name_sep(
 }
 
 void append_address_r1c1(
-    ostringstream& os, const address_t& addr, const abs_address_t& pos)
+    std::ostringstream& os, const address_t& addr, const abs_address_t& pos)
 {
     if (addr.row != row_unset)
     {
@@ -453,17 +451,17 @@ void append_address_r1c1(
     }
 }
 
-void append_name_string(ostringstream& os, const iface::formula_model_access* cxt, string_id_t sid)
+void append_name_string(std::ostringstream& os, const model_context* cxt, string_id_t sid)
 {
     if (!cxt)
         return;
 
-    const string* p = cxt->get_string(sid);
+    const std::string* p = cxt->get_string(sid);
     if (p)
         os << *p;
 }
 
-char append_table_areas(ostringstream& os, const table_t& table)
+char append_table_areas(std::ostringstream& os, const table_t& table)
 {
     if (table.areas == table_area_all)
     {
@@ -516,7 +514,7 @@ struct parse_address_result
 
 #if IXION_LOGGING
 
-std::ostream& operator<< (std::ostream& os, parse_address_result_type rt)
+[[maybe_unused]] std::ostream& operator<< (std::ostream& os, parse_address_result_type rt)
 {
     static const char* names[] = {
         "invalid",
@@ -528,7 +526,7 @@ std::ostream& operator<< (std::ostream& os, parse_address_result_type rt)
     return os;
 }
 
-std::string to_string(parse_address_result_type rt)
+[[maybe_unused]] std::string to_string(parse_address_result_type rt)
 {
     std::ostringstream os;
     os << rt;
@@ -537,74 +535,84 @@ std::string to_string(parse_address_result_type rt)
 
 #endif
 
-bool parse_sheet_name_quoted(
-    const ixion::iface::formula_model_access& cxt, const char sep, const char*& p, const char* p_last, sheet_t& sheet)
+/**
+ * Upon successful parsing, the position should be on the separator character.
+ */
+std::optional<sheet_t> parse_sheet_name_quoted(
+    const ixion::model_context& cxt, const char sep, const char*& p, const char* p_end)
 {
+    assert(*p == '\'');
+
     ++p; // skip the open quote.
-    size_t len = 0;
-    string buffer; // used only when the name contains at least one single quote.
+    std::size_t len = 0;
+    std::string buffer; // used only when the name contains at least one single quote.
     const char* p1 = p;
 
     // parse until the closing quote is reached.
-    while (true)
+    for (; p < p_end; ++p)
     {
         if (*p == '\'')
         {
-            if (p == p_last)
+            ++p; // skip the quote
+            if (p == p_end)
                 break;
 
-            if (*(p+1) == '\'')
+            if (*p == '\'')
             {
                 // next character is a quote too.  Store the parsed string
                 // segment to the buffer and move on.
-                ++p;
                 ++len;
-                buffer += string(p1, len);
-                ++p;
-                p1 = p;
+                buffer += std::string(p1, len);
+                p1 = p + 1;
                 len = 0;
                 continue;
             }
 
-            if (*(p+1) != sep)
+            if (*p != sep)
                 // the next char must be the separator.  Parse failed.
                 break;
+
+            std::optional<sheet_t> sheet;
 
             if (buffer.empty())
                 // Name contains no single quotes.
                 sheet = cxt.get_sheet_index({p1, len});
             else
             {
-                buffer += string(p1, len);
+                buffer += std::string(p1, len);
                 sheet = cxt.get_sheet_index({buffer.data(), buffer.size()});
             }
 
-            ++p; // skip the closing quote.
-            if (p != p_last)
-                ++p; // skip the separator.
-            return true;
+            return sheet;
         }
 
-        if (p == p_last)
-            break;
-
-        ++p;
         ++len;
     }
 
-    return false;
+    return std::optional<sheet_t>{};
 }
 
 /**
  * Try to parse a sheet name prefix in the string.  If this fails, revert
  * the current position back to the original position prior to the call.
  *
- * @return true if the string contains a valid sheet name, false otherwise.
+ * Upon successful parsing, the position should be on the separator character.
+ *
+ * @param cxt model context used to query sheet names.
+ * @param sep separator character between sheet name and the cell address.
+ * @param p pointer to the first character. When the parsing is succesful,
+ *          this will point to the separator character, but if the parsing
+ *          fails, it will point to the same character it pointed to prior to
+ *          calling this function.
+ * @param p_end end position that is one character past the last parsable
+ *              character.
+ *
+ * @return value containing sheet index upon success, or empty upon failure.
  */
-bool parse_sheet_name(
-    const ixion::iface::formula_model_access& cxt, const char sep, const char*& p, const char* p_last, sheet_t& sheet)
+std::optional<sheet_t> parse_sheet_name(
+    const ixion::model_context& cxt, const char sep, const char*& p, const char* p_end)
 {
-    assert(p <= p_last);
+    assert(p < p_end);
 
     const char* p_old = p; // old position to revert to in case we fail to parse a sheet name.
 
@@ -613,45 +621,196 @@ bool parse_sheet_name(
 
     if (*p == '\'')
     {
-        bool success = parse_sheet_name_quoted(cxt, sep, p, p_last, sheet);
-        if (!success)
+        auto sheet = parse_sheet_name_quoted(cxt, sep, p, p_end);
+        if (!sheet)
             p = p_old;
-        return success;
+        return sheet;
     }
 
     const char* p0 = p;
     size_t len = 0;
 
     // parse until we hit the sheet-address separator.
-    while (true)
+    for (; p < p_end; ++p, ++len)
     {
         if (*p == sep)
-        {
-            sheet = cxt.get_sheet_index({p0, len});
-            if (p != p_last)
-                ++p; // skip the separator.
-            return true;
-        }
-
-        if (p == p_last)
-            break;
-
-        ++p;
-        ++len;
+            return cxt.get_sheet_index({p0, len});
     }
 
     p = p_old;
-    return false;
+    return std::optional<sheet_t>{};
+}
+
+struct sheet_range_t
+{
+    bool present = false; // whether or not the address contains sheet name segment
+    sheet_t sheet1 = invalid_sheet;
+    sheet_t sheet2 = invalid_sheet;
+
+    bool valid() const
+    {
+        return sheet1 != invalid_sheet || sheet2 != invalid_sheet;
+    }
+};
+
+sheet_range_t parse_excel_sheet_name_quoted(const ixion::model_context& cxt, const char*& p, const char* p_end)
+{
+    assert(*p == '\'');
+    const char* p_old = p; // old position to revert to in case we fail to parse a sheet name.
+
+    ++p; // skip the quote
+
+    sheet_range_t ret;
+    bool was_quote = false; // record if the last char was a quote, but only when it followed a non-quote char.
+    std::string buf; // for name containing quote(s)
+
+    for (const char* p0 = nullptr; p < p_end; ++p)
+    {
+        if (!p0)
+            p0 = p;
+
+        switch (*p)
+        {
+            case '!':
+            {
+                if (!was_quote)
+                {
+                    // Fail
+                    p = p_end;
+                    break;
+                }
+
+                assert(ret.sheet2 == invalid_sheet);
+                std::size_t n = std::distance(p0, p) - 1u;
+                buf += std::string_view{p0, n};
+                ret.sheet2 = cxt.get_sheet_index(buf);
+                ret.present = true;
+                return ret;
+            }
+            case ':':
+            {
+                if (ret.sheet1 != invalid_sheet)
+                {
+                    // likely the second range separator, which is not allowed. Fail.
+                    p = p_end;
+                    break;
+                }
+
+                std::size_t n = std::distance(p0, p);
+                buf += std::string_view{p0, n};
+                ret.sheet1 = cxt.get_sheet_index(buf);
+                p0 = nullptr;
+                buf.clear();
+                was_quote = false;
+                break;
+            }
+            case '\'':
+            {
+                if (was_quote)
+                {
+                    // two consequtive quotes are treated as a single quote.
+                    std::size_t n = std::distance(p0, p);
+                    buf += std::string_view{p0, n};
+                    p0 = nullptr;
+                }
+
+                // if more than two quotes occur, set the flag only on the 1st, 3rd, 5th etc.
+                was_quote = !was_quote;
+                break;
+            }
+            default:
+                was_quote = false;
+        }
+    }
+
+    p = p_old;
+    ret.sheet1 = ret.sheet2 = invalid_sheet;
+    return ret;
+}
+
+/**
+ * Parse an Excel sheet name string.  An Excel name can be a range of sheets
+ * separated by a ':' e.g. Sheet1:Sheet2!A1:B2.
+ *
+ * @return sheet range values. It can either contain 1) two valid sheet
+ *         indices for a range of sheets, 2) sheet1 invalid and sheet2 valid
+ *         for a single sheet name, or 3) both sheet indices are invalid.
+ */
+sheet_range_t parse_excel_sheet_name(const ixion::model_context& cxt, const char*& p, const char* p_end)
+{
+    assert(p < p_end);
+    if (*p == '\'')
+        return parse_excel_sheet_name_quoted(cxt, p, p_end);
+
+    sheet_range_t ret;
+
+    const char* p_old = p; // old position to revert to in case we fail to parse a sheet name.
+
+    for (const char* p0 = nullptr; p < p_end; ++p)
+    {
+        if (!p0)
+            p0 = p;
+
+        switch (*p)
+        {
+            case '!':
+            {
+                assert(ret.sheet2 == invalid_sheet);
+                std::size_t n = std::distance(p0, p);
+                std::string_view name{p0, n};
+                ret.sheet2 = cxt.get_sheet_index(name);
+                ret.present = true;
+                return ret;
+            }
+            case ':':
+            {
+                if (ret.sheet1 != invalid_sheet)
+                {
+                    // likely the second range separator, which is not allowed. Fail.
+                    p = p_end;
+                    break;
+                }
+
+                std::size_t n = std::distance(p0, p);
+                std::string_view name{p0, n};
+                ret.sheet1 = cxt.get_sheet_index(name);
+                p0 = nullptr;
+                break;
+            }
+            case ' ':
+            case '\'':
+            case '"':
+            {
+                // invalid char. Check if a '!' occurs at a later position.
+                for (++p; p < p_end; ++p)
+                {
+                    if (*p == '!')
+                    {
+                        ret.present = true;
+                        p = p_end;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    p = p_old;
+    ret.sheet1 = ret.sheet2 = invalid_sheet;
+    return ret;
 }
 
 /**
  * If there is no number to parse, it returns 0 and the p will not
- * increment. Otherwise, p will point to the last digit of the number when
- * the call returns.
+ * increment. Otherwise, p will point to the position past the last parsed
+ * digit character.
  */
 template<typename T>
-T parse_number(const char*&p, const char* p_last)
+T parse_number(const char*&p, const char* p_end)
 {
+    assert(p < p_end);
+
     T num = 0;
 
     bool sign = false;
@@ -663,22 +822,12 @@ T parse_number(const char*&p, const char* p_last)
         sign = true;
     }
 
-    bool all_digits = false;
-    while (std::isdigit(*p))
+    for (; p < p_end && std::isdigit(*p); ++p)
     {
         // Parse number.
         num *= 10;
         num += *p - '0';
-        if (p == p_last)
-        {
-            all_digits = true;
-            break;
-        }
-        ++p;
     }
-
-    if (!all_digits)
-        --p;
 
     if (sign)
         num *= -1;
@@ -690,14 +839,13 @@ T parse_number(const char*&p, const char* p_last)
  * Parse A1-style single cell address.
  *
  * @param p it must point to the first character of a cell address.
- * @param p_last it must point to the last character of a whole string
- *               sequence.  It doesn't have to be the last character of a
- *               cell address.
+ * @param p_end end position that is one character past the last character of
+ *              a parsable character sequence.
  * @param addr resolved cell address.
  *
  * @return parsing result.
  */
-parse_address_result_type parse_address_a1(const char*& p, const char* p_last, address_t& addr)
+parse_address_result_type parse_address_a1(const char*& p, const char* p_end, address_t& addr)
 {
     // NOTE: Row and column IDs are 1-based during parsing, while 0 is used as
     // the state of a value-not-set.  They are subtracted by one before
@@ -705,7 +853,7 @@ parse_address_result_type parse_address_a1(const char*& p, const char* p_last, a
 
     resolver_parse_mode mode = resolver_parse_mode::column;
 
-    while (true)
+    for (; p < p_end; ++p)
     {
         char c = *p;
         if ('a' <= c && c <= 'z')
@@ -797,11 +945,6 @@ parse_address_result_type parse_address_a1(const char*& p, const char* p_last, a
         }
         else
             return invalid;
-
-        if (p == p_last)
-            // last character reached.
-            break;
-        ++p;
     }
 
     if (mode == resolver_parse_mode::row)
@@ -830,8 +973,10 @@ parse_address_result_type parse_address_a1(const char*& p, const char* p_last, a
     return valid_address;
 }
 
-parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last, address_t& addr)
+parse_address_result_type parse_address_r1c1(const char*& p, const char* p_end, address_t& addr)
 {
+    assert(p < p_end);
+
     addr.row = row_unset;
     addr.column = column_unset;
 
@@ -839,12 +984,12 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
     {
         addr.row = 0;
         addr.abs_row = false;
+        ++p;
 
-        if (p == p_last)
+        if (p == p_end)
             // Just 'R'.  Not sure if this is valid or invalid, but let's call it invalid for now.
             return parse_address_result_type::invalid;
 
-        ++p;
         if (*p != 'C' && *p != 'c')
         {
             addr.abs_row = (*p != '[');
@@ -855,26 +1000,24 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
                 if (!std::isdigit(*p) && *p != '-' && *p != '+')
                     return parse_address_result_type::invalid;
 
-                addr.row = parse_number<row_t>(p, p_last);
-                ++p;
-                if (p == p_last)
+                addr.row = parse_number<row_t>(p, p_end);
+                if (p + 1 == p_end)
                     return (*p == ']') ? parse_address_result_type::valid_address : parse_address_result_type::invalid;
                 ++p;
             }
             else if (std::isdigit(*p))
             {
                 // Absolute row address.
-                addr.row = parse_number<row_t>(p, p_last);
+                addr.row = parse_number<row_t>(p, p_end);
                 if (addr.row <= 0)
                     // absolute address with 0 or negative value is invalid.
                     return parse_address_result_type::invalid;
 
                 --addr.row; // 1-based to 0-based.
 
-                if (p == p_last && std::isdigit(*p))
+                if (p == p_end)
                     // 'R' followed by a number without 'C' is valid.
                     return parse_address_result_type::valid_address;
-                ++p;
             }
         }
     }
@@ -884,7 +1027,8 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
         addr.column = 0;
         addr.abs_column = false;
 
-        if (p == p_last)
+        ++p;
+        if (p == p_end)
         {
             if (addr.row == row_unset)
                 // Just 'C'.  Row must be set.
@@ -897,17 +1041,18 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
             return parse_address_result_type::valid_address;
         }
 
-        ++p;
         if (*p == '[')
         {
             // Relative column address.
             ++p;
+            if (p == p_end)
+                return parse_address_result_type::invalid;
+
             if (!std::isdigit(*p) && *p != '-' && *p != '+')
                 return parse_address_result_type::invalid;
 
-            addr.column = parse_number<col_t>(p, p_last);
-            ++p;
-            if (p == p_last)
+            addr.column = parse_number<col_t>(p, p_end);
+            if (p + 1 == p_end)
                 return (*p == ']') ? parse_address_result_type::valid_address : parse_address_result_type::invalid;
 
             ++p;
@@ -916,28 +1061,26 @@ parse_address_result_type parse_address_r1c1(const char*& p, const char* p_last,
         {
             // Absolute column address.
             addr.abs_column = true;
-            addr.column = parse_number<col_t>(p, p_last);
+            addr.column = parse_number<col_t>(p, p_end);
             if (addr.column <= 0)
                 // absolute address with 0 or negative value is invalid.
                 return parse_address_result_type::invalid;
 
             --addr.column; // 1-based to 0-based.
 
-            if (p == p_last)
+            if (p == p_end)
                 return parse_address_result_type::valid_address;
-
-            ++p;
         }
     }
 
     if (*p == ':')
-        return (p == p_last) ? parse_address_result_type::invalid : parse_address_result_type::range_expected;
+        return (p + 1 == p_end) ? parse_address_result_type::invalid : parse_address_result_type::range_expected;
 
     return parse_address_result_type::invalid;
 }
 
 parse_address_result parse_address_calc_a1(
-    const ixion::iface::formula_model_access* cxt, const char*& p, const char* p_last, address_t& addr)
+    const ixion::model_context* cxt, const char*& p, const char* p_last, address_t& addr)
 {
     parse_address_result res;
 
@@ -950,12 +1093,17 @@ parse_address_result parse_address_calc_a1(
     {
         // Overwrite the sheet index *only when* the sheet name is parsed successfully.
         const char* p0 = p;
-        res.sheet_name = parse_sheet_name(*cxt, '.', p, p_last, addr.sheet);
-        if (res.sheet_name)
+        auto sheet = parse_sheet_name(*cxt, '.', p, p_last + 1);
+        res.sheet_name = sheet.has_value();
+        if (sheet)
+        {
+            ++p; // skip the separator
+            addr.sheet = *sheet;
             addr.abs_sheet = (*p0 == '$');
+        }
     }
 
-    res.result = parse_address_a1(p, p_last, addr);
+    res.result = parse_address_a1(p, ++p_last, addr);
     return res;
 }
 
@@ -965,7 +1113,7 @@ parse_address_result parse_address_calc_a1(
  * '.E1' as opposed to just 'E1'.
  */
 parse_address_result parse_address_odf_cra(
-    const ixion::iface::formula_model_access* cxt, const char*& p, const char* p_last, address_t& addr)
+    const ixion::model_context* cxt, const char*& p, const char* p_last, address_t& addr)
 {
     if (*p == '.')
     {
@@ -977,8 +1125,7 @@ parse_address_result parse_address_odf_cra(
     return parse_address_calc_a1(cxt, p, p_last, addr);
 }
 
-parse_address_result_type parse_address_excel_a1(
-    const ixion::iface::formula_model_access* cxt, const char*& p, const char* p_last, address_t& addr)
+parse_address_result_type parse_address_excel_a1(const char*& p, const char* p_end, address_t& addr)
 {
     addr.row = 0;
     addr.column = 0;
@@ -986,15 +1133,10 @@ parse_address_result_type parse_address_excel_a1(
     addr.abs_row = false;
     addr.abs_column = false;
 
-    if (cxt)
-        // Overwrite the sheet index *only when* the sheet name is parsed successfully.
-        parse_sheet_name(*cxt, '!', p, p_last, addr.sheet);
-
-    return parse_address_a1(p, p_last, addr);
+    return parse_address_a1(p, p_end, addr);
 }
 
-parse_address_result_type parse_address_excel_r1c1(
-    const iface::formula_model_access* cxt, const char*& p, const char* p_last, address_t& addr)
+parse_address_result_type parse_address_excel_r1c1(const char*& p, const char* p_end, address_t& addr)
 {
     addr.row = 0;
     addr.column = 0;
@@ -1002,15 +1144,11 @@ parse_address_result_type parse_address_excel_r1c1(
     addr.abs_row = false;
     addr.abs_column = false;
 
-    if (cxt)
-        // Overwrite the sheet index *only when* the sheet name is parsed successfully.
-        parse_sheet_name(*cxt, '!', p, p_last, addr.sheet);
-
-    return parse_address_r1c1(p, p_last, addr);
+    return parse_address_r1c1(p, p_end, addr);
 }
 
 parse_address_result parse_address_odff(
-    const ixion::iface::formula_model_access* cxt, const char*& p, const char* p_last, address_t& addr)
+    const ixion::model_context* cxt, const char*& p, const char* p_last, address_t& addr)
 {
     parse_address_result res;
     assert(p <= p_last);
@@ -1040,10 +1178,17 @@ parse_address_result parse_address_odff(
         }
 
         if (p <= p_last)
-            parse_sheet_name(*cxt, '.', p, p_last, addr.sheet);
+        {
+            auto sheet = parse_sheet_name(*cxt, '.', p, p_last + 1);
+            if (sheet)
+            {
+                ++p; // skip the separator
+                addr.sheet = *sheet;
+            }
+        }
     }
 
-    res.result = parse_address_a1(p, p_last, addr);
+    res.result = parse_address_a1(p, ++p_last, addr);
     return res;
 }
 
@@ -1057,9 +1202,9 @@ void to_relative_address(address_t& addr, const abs_address_t& pos, bool sheet)
         addr.column -= pos.column;
 }
 
-string to_string(const iface::formula_model_access* cxt, const table_t& table)
+std::string to_string(const model_context* cxt, const table_t& table)
 {
-    ostringstream os;
+    std::ostringstream os;
     append_name_string(os, cxt, table.name);
 
     if (table.column_first == empty_string_id)
@@ -1137,7 +1282,7 @@ string to_string(const iface::formula_model_access* cxt, const table_t& table)
 formula_name_t::formula_name_t() :
     type(invalid), value(formula_function_t::func_unknown) {}
 
-string formula_name_t::to_string() const
+std::string formula_name_t::to_string() const
 {
     std::ostringstream os;
 
@@ -1176,9 +1321,9 @@ formula_name_resolver::~formula_name_resolver() {}
 
 namespace {
 
-string get_column_name_a1(col_t col)
+std::string get_column_name_a1(col_t col)
 {
-    ostringstream os;
+    std::ostringstream os;
     append_column_name_a1(os, col);
     return os.str();
 }
@@ -1186,7 +1331,7 @@ string get_column_name_a1(col_t col)
 class excel_a1 : public formula_name_resolver
 {
 public:
-    excel_a1(const iface::formula_model_access* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
+    excel_a1(const model_context* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
     virtual ~excel_a1() {}
 
     virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
@@ -1204,21 +1349,32 @@ public:
         if (resolve_table(mp_cxt, p, n, ret))
             return ret;
 
-        const char* p_last = p;
-        std::advance(p_last, n-1);
+        const char* p_end = p + n;
+
+        sheet_range_t sheets;
+
+        if (mp_cxt)
+        {
+            sheets = parse_excel_sheet_name(*mp_cxt, p, p_end);
+            if (sheets.present && sheets.sheet2 == invalid_sheet)
+                // Sheet name(s) given but is not found in the model.
+                return ret;
+
+            if (sheets.present)
+            {
+                assert(*p == '!');
+                ++p; // skip the '!'
+            }
+        }
 
         // Use the sheet where the cell is unless sheet name is explicitly given.
         address_t parsed_addr(pos.sheet, 0, 0, false, false, false);
 
-        parse_address_result_type parse_res = parse_address_excel_a1(mp_cxt, p, p_last, parsed_addr);
+        parse_address_result_type parse_res = parse_address_excel_a1(p, p_end, parsed_addr);
 
         if (parse_res != invalid)
         {
             // This is a valid A1-style address syntax-wise.
-
-            if (parsed_addr.sheet == invalid_sheet)
-                // sheet name is not found in the model.  Report back as invalid.
-                return ret;
 
             if (!check_address_by_sheet_bounds(mp_cxt, parsed_addr))
                 parse_res = invalid;
@@ -1228,27 +1384,49 @@ public:
         if (parse_res == valid_address && parsed_addr.row != row_unset)
         {
             // This is a single cell address.
-            to_relative_address(parsed_addr, pos, true);
-            set_cell_reference(ret, parsed_addr);
+            to_relative_address(parsed_addr, pos, false);
+
+            if (sheets.present)
+            {
+                if (sheets.sheet1 != invalid_sheet)
+                {
+                    // range of sheets is given. Switch to a range.
+                    range_t v{parsed_addr, parsed_addr};
+                    v.first.sheet = sheets.sheet1;
+                    v.last.sheet = sheets.sheet2;
+
+                    ret.value = v;
+                    ret.type = formula_name_t::range_reference;
+                }
+                else
+                {
+                    // single sheet is given.
+                    parsed_addr.sheet = sheets.sheet2;
+                    set_cell_reference(ret, parsed_addr);
+                }
+            }
+            else
+                set_cell_reference(ret, parsed_addr);
 
             return ret;
         }
 
         if (parse_res == range_expected)
         {
-            if (p == p_last)
+            assert(*p == ':');
+            ++p; // skip ':'
+
+            if (p == p_end)
                 // ':' occurs as the last character.  This is not allowed.
                 return ret;
 
-            ++p; // skip ':'
-
             range_t v;
-            to_relative_address(parsed_addr, pos, true);
+            to_relative_address(parsed_addr, pos, false);
             v.first = parsed_addr;
 
             // For now, we assume the sheet index of the end address is identical
             // to that of the begin address.
-            parse_res = parse_address_excel_a1(NULL, p, p_last, parsed_addr);
+            parse_res = parse_address_excel_a1(p, p_end, parsed_addr);
             if (parse_res != valid_address)
             {
                 // The 2nd part after the ':' is not valid.
@@ -1256,9 +1434,25 @@ public:
                 return ret;
             }
 
-            to_relative_address(parsed_addr, pos, true);
+            to_relative_address(parsed_addr, pos, false);
             v.last = parsed_addr;
             v.last.sheet = v.first.sheet; // re-use the sheet index of the begin address.
+
+            if (sheets.present)
+            {
+                if (sheets.sheet1 != invalid_sheet)
+                {
+                    // range of sheets is given
+                    v.first.sheet = sheets.sheet1;
+                    v.last.sheet = sheets.sheet2;
+                }
+                else
+                {
+                    // single sheet is given
+                    v.first.sheet = v.last.sheet = sheets.sheet2;
+                }
+            }
+
             ret.value = v;
             ret.type = formula_name_t::range_reference;
             return ret;
@@ -1268,18 +1462,18 @@ public:
         return ret;
     }
 
-    virtual string get_name(const address_t& addr, const abs_address_t& pos, bool sheet_name) const
+    virtual std::string get_name(const address_t& addr, const abs_address_t& pos, bool sheet_name) const
     {
-        ostringstream os;
+        std::ostringstream os;
         append_address_a1(os, sheet_name ? mp_cxt : nullptr, addr, pos, '!');
         return os.str();
     }
 
-    virtual string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const
+    virtual std::string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const
     {
         // For now, sheet index of the end-range address is ignored.
 
-        ostringstream os;
+        std::ostringstream os;
         col_t col = range.first.column;
         row_t row = range.first.row;
         sheet_t sheet = range.first.sheet;
@@ -1314,25 +1508,25 @@ public:
         return os.str();
     }
 
-    virtual string get_name(const table_t& table) const
+    virtual std::string get_name(const table_t& table) const
     {
         return to_string(mp_cxt, table);
     }
 
-    virtual string get_column_name(col_t col) const
+    virtual std::string get_column_name(col_t col) const
     {
         return get_column_name_a1(col);
     }
 
 private:
-    const iface::formula_model_access* mp_cxt;
+    const model_context* mp_cxt;
 };
 
 class excel_r1c1 : public formula_name_resolver
 {
-    const iface::formula_model_access* mp_cxt;
+    const model_context* mp_cxt;
 
-    void write_sheet_name(ostringstream& os, const address_t& addr, const abs_address_t& pos) const
+    void write_sheet_name(std::ostringstream& os, const address_t& addr, const abs_address_t& pos) const
     {
         if (mp_cxt)
         {
@@ -1346,7 +1540,7 @@ class excel_r1c1 : public formula_name_resolver
     }
 
 public:
-    excel_r1c1(const iface::formula_model_access* cxt) : mp_cxt(cxt) {}
+    excel_r1c1(const model_context* cxt) : mp_cxt(cxt) {}
 
     virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
     {
@@ -1361,31 +1555,53 @@ public:
             return ret;
 
         const char* p_end = p + n;
-        const char* p_last = p;
-        std::advance(p_last, n-1);
+
+        sheet_range_t sheets;
+
+        if (mp_cxt)
+        {
+            sheets = parse_excel_sheet_name(*mp_cxt, p, p_end);
+            if (sheets.present && sheets.sheet2 == invalid_sheet)
+                // Sheet name(s) given but is not found in the model.
+                return ret;
+
+            if (sheets.present)
+            {
+                assert(*p == '!');
+                ++p; // skip the '!'
+            }
+        }
 
         // Use the sheet where the cell is unless sheet name is explicitly given.
         address_t parsed_addr(pos.sheet, 0, 0);
-
-        parse_address_result_type parse_res = parse_address_excel_r1c1(mp_cxt, p, p_last, parsed_addr);
-
-        if (parse_res != invalid)
-        {
-            // This is a valid R1C1-style address syntax-wise.
-
-            if (parsed_addr.sheet == invalid_sheet)
-                // sheet name is not found in the model.  Report back as invalid.
-                return ret;
-
-            if (!check_address_by_sheet_bounds(mp_cxt, parsed_addr))
-                parse_res = invalid;
-        }
+        parse_address_result_type parse_res = parse_address_excel_r1c1(p, p_end, parsed_addr);
 
         switch (parse_res)
         {
             case parse_address_result_type::valid_address:
             {
-                set_cell_reference(ret, parsed_addr);
+                if (sheets.present)
+                {
+                    if (sheets.sheet1 != invalid_sheet)
+                    {
+                        // range of sheets is given. Switch to a range.
+                        range_t v{parsed_addr, parsed_addr};
+                        v.first.sheet = sheets.sheet1;
+                        v.last.sheet = sheets.sheet2;
+
+                        ret.value = v;
+                        ret.type = formula_name_t::range_reference;
+                    }
+                    else
+                    {
+                        // single sheet is given.
+                        parsed_addr.sheet = sheets.sheet2;
+                        set_cell_reference(ret, parsed_addr);
+                    }
+                }
+                else
+                    set_cell_reference(ret, parsed_addr);
+
                 return ret;
             }
             case parse_address_result_type::range_expected:
@@ -1394,20 +1610,31 @@ public:
                 if (p == p_end)
                     return ret;
 
-                address_t parsed_addr2(0, 0, 0);
-                parse_address_result_type parse_res2 = parse_address_excel_r1c1(nullptr, p, p_last, parsed_addr2);
+                range_t v;
+                v.first = parsed_addr;
+
+                parse_address_result_type parse_res2 = parse_address_excel_r1c1(p, p_end, parsed_addr);
                 if (parse_res2 != parse_address_result_type::valid_address)
                     return ret;
 
-                // For now, we assume the sheet index of the end address is identical
-                // to that of the begin address.
-                parsed_addr2.sheet = parsed_addr.sheet;
+                v.last = parsed_addr;
+
+                if (sheets.present)
+                {
+                    if (sheets.sheet1 != invalid_sheet)
+                    {
+                        // range of sheets is given
+                        v.first.sheet = sheets.sheet1;
+                        v.last.sheet = sheets.sheet2;
+                    }
+                    else
+                    {
+                        // single sheet is given
+                        v.first.sheet = v.last.sheet = sheets.sheet2;
+                    }
+                }
 
                 ret.type = formula_name_t::range_reference;
-
-                range_t v;
-                v.first = parsed_addr;
-                v.last = parsed_addr2;
                 ret.value = v;
 
                 return ret;
@@ -1422,7 +1649,7 @@ public:
 
     virtual std::string get_name(const address_t& addr, const abs_address_t& pos, bool sheet_name) const
     {
-        ostringstream os;
+        std::ostringstream os;
 
         if (sheet_name)
             write_sheet_name(os, addr, pos);
@@ -1433,7 +1660,7 @@ public:
 
     virtual std::string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const
     {
-        ostringstream os;
+        std::ostringstream os;
 
         if (sheet_name)
             write_sheet_name(os, range.first, pos);
@@ -1451,7 +1678,7 @@ public:
 
     virtual std::string get_column_name(col_t col) const
     {
-        ostringstream os;
+        std::ostringstream os;
         os << (col+1);
         return os.str();
     }
@@ -1461,20 +1688,20 @@ class dot_a1_resolver : public formula_name_resolver
 {
     using func_parse_address_type =
         std::function<parse_address_result(
-            const ixion::iface::formula_model_access*,
+            const ixion::model_context*,
             const char*&, const char*, address_t&)>;
 
     using func_append_address_type =
         std::function<void(
-            std::ostringstream&, const ixion::iface::formula_model_access*,
+            std::ostringstream&, const ixion::model_context*,
             const address_t&, const abs_address_t&, char)>;
 
     using func_append_sheet_name_type =
         std::function<void(
-            std::ostringstream&, const ixion::iface::formula_model_access*,
+            std::ostringstream&, const ixion::model_context*,
             const address_t&, const abs_address_t&)>;
 
-    const iface::formula_model_access* mp_cxt;
+    const model_context* mp_cxt;
     func_parse_address_type m_func_parse_address;
     func_append_address_type m_func_append_address;
     func_append_sheet_name_type m_func_append_sheet_name;
@@ -1490,7 +1717,7 @@ class dot_a1_resolver : public formula_name_resolver
 
 public:
     dot_a1_resolver(
-        const iface::formula_model_access* cxt,
+        const model_context* cxt,
         func_parse_address_type func_parse_address,
         func_append_address_type func_append_address,
         func_append_sheet_name_type func_append_sheet_name) :
@@ -1592,7 +1819,7 @@ public:
 
     virtual std::string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const override
     {
-        ostringstream os;
+        std::ostringstream os;
         col_t col = range.first.column;
         row_t row = range.first.row;
 
@@ -1635,7 +1862,7 @@ public:
 class odff_resolver : public formula_name_resolver
 {
 public:
-    odff_resolver(const iface::formula_model_access* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
+    odff_resolver(const model_context* cxt) : formula_name_resolver(), mp_cxt(cxt) {}
     virtual ~odff_resolver() {}
 
     virtual formula_name_t resolve(std::string_view s, const abs_address_t& pos) const
@@ -1714,12 +1941,12 @@ public:
         return ret;
     }
 
-    virtual string get_name(const address_t& addr, const abs_address_t& pos, bool sheet_name) const
+    virtual std::string get_name(const address_t& addr, const abs_address_t& pos, bool sheet_name) const
     {
         if (!mp_cxt)
             sheet_name = false;
 
-        ostringstream os;
+        std::ostringstream os;
         os << '[';
         if (sheet_name)
         {
@@ -1736,17 +1963,17 @@ public:
         return os.str();
     }
 
-    virtual string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const
+    virtual std::string get_name(const range_t& range, const abs_address_t& pos, bool sheet_name) const
     {
         if (!mp_cxt)
             sheet_name = false;
 
-        ostringstream os;
+        std::ostringstream os;
         os << '[';
 
         if (sheet_name)
         {
-            const iface::formula_model_access* cxt = mp_cxt;
+            const model_context* cxt = mp_cxt;
 
             if (range.first.abs_sheet)
                 os << '$';
@@ -1781,25 +2008,25 @@ public:
         return os.str();
     }
 
-    virtual string get_name(const table_t& table) const
+    virtual std::string get_name(const table_t& table) const
     {
         // TODO : ODF doesn't support table reference yet.
-        return string();
+        return std::string();
     }
 
-    virtual string get_column_name(col_t col) const
+    virtual std::string get_column_name(col_t col) const
     {
         return get_column_name_a1(col);
     }
 
 private:
-    const iface::formula_model_access* mp_cxt;
+    const model_context* mp_cxt;
 };
 
 }
 
 std::unique_ptr<formula_name_resolver> formula_name_resolver::get(
-    formula_name_resolver_t type, const iface::formula_model_access* cxt)
+    formula_name_resolver_t type, const model_context* cxt)
 {
 
     switch (type)

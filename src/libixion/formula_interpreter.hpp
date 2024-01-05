@@ -24,7 +24,6 @@ class formula_cell;
 
 namespace iface {
 
-class formula_model_access;
 class session_handler;
 
 }
@@ -54,7 +53,7 @@ public:
     formula_interpreter(const formula_interpreter&) = delete;
     formula_interpreter& operator= (formula_interpreter) = delete;
 
-    formula_interpreter(const formula_cell* cell, iface::formula_model_access& cxt);
+    formula_interpreter(const formula_cell* cell, model_context& cxt);
     ~formula_interpreter();
 
     void set_origin(const abs_address_t& pos);
@@ -79,6 +78,7 @@ private:
     const formula_token& token() const;
     const formula_token& token_or_throw() const;
     const formula_token& next_token();
+    const std::string& string_or_throw() const;
 
     // The following methods are handlers.  In each handler, the initial
     // position is always set to the first unprocessed token.  Each handler is
@@ -95,6 +95,7 @@ private:
     void table_ref();
     void constant();
     void literal();
+    void array();
     void function();
 
     void clear_stacks();
@@ -105,7 +106,7 @@ private:
 
 private:
     const formula_cell* m_parent_cell;
-    iface::formula_model_access& m_context;
+    model_context& m_context;
     std::unique_ptr<iface::session_handler> mp_handler;
     abs_address_t m_pos;
 

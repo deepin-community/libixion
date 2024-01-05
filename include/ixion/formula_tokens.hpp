@@ -11,9 +11,11 @@
 #include "address.hpp"
 #include "table.hpp"
 #include "formula_opcode.hpp"
+#include "formula_function_opcode.hpp"
 #include "formula_tokens_fwd.hpp"
 
 #include <string>
+#include <variant>
 
 namespace ixion {
 
@@ -37,31 +39,114 @@ IXION_DLLPUBLIC std::string_view get_opcode_name(fopcode_t oc);
  */
 IXION_DLLPUBLIC std::string_view get_formula_opcode_string(fopcode_t oc);
 
-class IXION_DLLPUBLIC formula_token
+/**
+ * Represents a single formula token.
+ */
+struct IXION_DLLPUBLIC formula_token final
 {
-    fopcode_t m_opcode;
+    using value_type = std::variant<
+        address_t, range_t, table_t, formula_function_t,
+        double, string_id_t, std::string>;
 
-public:
+    /**
+     * Opcode that specifies the type of token.  The value of this data member
+     * should <i>not</i> be modified after construction.
+     */
+    const fopcode_t opcode;
+
+    /**
+     * Value stored in the token. The type of this value varies depending on the
+     * token opcode value.
+     */
+    value_type value;
+
     formula_token() = delete;
 
+    /**
+     * Constructor for opcode-only token.
+     *
+     * @param op formula opcode.
+     */
     formula_token(fopcode_t op);
-    formula_token(const formula_token& r);
-    virtual ~formula_token() = 0;
 
-    fopcode_t get_opcode() const;
+    /**
+     * Constructor for a single-cell reference token.  The opcode will be
+     * implicitly set to fop_single_ref.
+     *
+     * @param addr single-cell reference.
+     */
+    formula_token(const address_t& addr);
+
+    /**
+     * Constructor for a range reference token.  The opcode will be
+     * implicitly set to fop_range_ref.
+     *
+     * @param range range reference.
+     */
+    formula_token(const range_t& range);
+
+    /**
+     * Constructor for a table reference token.  The opcode will be implicitly
+     * set to fop_table_ref.
+     *
+     * @param table table reference.
+     */
+    formula_token(const table_t& table);
+
+    /**
+     * Constructor for a formula function token.  The opcode will be implicitly
+     * set to fop_function.
+     *
+     * @param func function name enum value.
+     */
+    formula_token(formula_function_t func);
+
+    /**
+     * Constructor for a numeric value token.  The opcode will be implicitly set
+     * to fop_value.
+     *
+     * @param v numeric value to be stored in the token.
+     */
+    formula_token(double v);
+
+    /**
+     * Constructor for a string value token.  The opcode will be implicitly
+     * set to fop_string.
+     *
+     * @param sid string ID to be stored in the token.
+     */
+    formula_token(string_id_t sid);
+
+    /**
+     * Constructor for a named-expression token.  The opcode will be implicitly
+     * set to fop_named_expression.
+     *
+     * @param name named expression to be stored in the token.
+     */
+    formula_token(std::string name);
+
+    /**
+     * Copy constructor.
+     */
+    formula_token(const formula_token& r);
+
+    /**
+     * Move constructor.
+     *
+     * @note This will be the same as the copy constructor if the stored value
+     *       is not movable.
+     */
+    formula_token(formula_token&& r);
+
+    ~formula_token();
 
     bool operator== (const formula_token& r) const;
     bool operator!= (const formula_token& r) const;
-
-    virtual address_t get_single_ref() const;
-    virtual range_t get_range_ref() const;
-    virtual table_t get_table_ref() const;
-    virtual double get_value() const;
-    virtual uint32_t get_uint32() const;
-    virtual std::string get_name() const;
-    virtual void write_string(std::ostream& os) const;
 };
 
+/**
+ * Storage for a series of formula tokens.
+ */
 class IXION_DLLPUBLIC formula_tokens_store
 {
     friend void intrusive_ptr_add_ref(formula_tokens_store*);
@@ -100,9 +185,18 @@ inline void intrusive_ptr_release(formula_tokens_store* p)
     p->release_ref();
 }
 
+/**
+ * Represents a named expression which stores a series of formula tokens.
+ */
 struct IXION_DLLPUBLIC named_expression_t
 {
+    /**
+     * Origin cell position which affects any relative references stored in
+     * the named expression.
+     */
     abs_address_t origin;
+
+    /** Formula tokens. */
     formula_tokens_t tokens;
 
     named_expression_t();
@@ -111,8 +205,6 @@ struct IXION_DLLPUBLIC named_expression_t
     named_expression_t(named_expression_t&& other);
     ~named_expression_t();
 };
-
-IXION_DLLPUBLIC bool operator== (const formula_tokens_t& left, const formula_tokens_t& right);
 
 IXION_DLLPUBLIC std::ostream& operator<< (std::ostream& os, const formula_token& ft);
 

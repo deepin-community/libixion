@@ -7,12 +7,16 @@
 
 #include "formula_functions.hpp"
 #include "debug.hpp"
-#include "mem_str_buf.hpp"
+#include "column_store_type.hpp" // internal mdds::multi_type_vector
+#include "utils.hpp"
+#include "utf8.hpp"
 
-#include "ixion/formula_tokens.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/macros.hpp"
+#include <ixion/formula_tokens.hpp>
+#include <ixion/formula_result.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/macros.hpp>
+#include <ixion/model_iterator.hpp>
+#include <ixion/cell_access.hpp>
 
 #ifdef max
 #undef max
@@ -27,10 +31,10 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include <optional>
+#include <iterator>
 
 #include <mdds/sorted_string_map.hpp>
-
-using namespace std;
 
 namespace ixion {
 
@@ -41,7 +45,7 @@ namespace builtin_funcs {
 typedef mdds::sorted_string_map<formula_function_t> map_type;
 
 // Keys must be sorted.
-const std::vector<map_type::entry> entries =
+constexpr map_type::entry entries[] =
 {
     { IXION_ASCII("ABS"), formula_function_t::func_abs },
     { IXION_ASCII("ACOS"), formula_function_t::func_acos },
@@ -370,13 +374,13 @@ const std::vector<map_type::entry> entries =
 
 const map_type& get()
 {
-    static map_type mt(entries.data(), entries.size(), formula_function_t::func_unknown);
+    static map_type mt(entries, std::size(entries), formula_function_t::func_unknown);
     return mt;
 }
 
 } // builtin_funcs namespace
 
-std::string_view unknown_func_name = "unknown";
+constexpr std::string_view unknown_func_name = "unknown";
 
 /**
  * Traverse all elements of a passed matrix to sum up their values.
@@ -423,17 +427,168 @@ numeric_matrix multiply_matrices(const matrix& left, const matrix& right)
     return output;
 }
 
+bool pop_and_check_for_odd_value(formula_value_stack& args)
+{
+    double v = args.pop_value();
+    intmax_t iv = std::trunc(v);
+    iv = std::abs(iv);
+    bool odd = iv & 0x01;
+    return odd;
+}
+
+/**
+ * Pop a single-value argument from the stack and interpret it as a boolean
+ * value if it's either boolean or numeric type, or ignore if it's a string or
+ * error type.  The behavior is undefined if called for non-single-value
+ * argument type.
+ */
+std::optional<bool> pop_one_value_as_boolean(const model_context& cxt, formula_value_stack& args)
+{
+    std::optional<bool> ret;
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            auto addr = args.pop_single_ref();
+            cell_access ca = cxt.get_cell_access(addr);
+
+            switch (ca.get_value_type())
+            {
+                case cell_value_t::boolean:
+                case cell_value_t::numeric:
+                    ret = ca.get_boolean_value();
+                    break;
+                default:;
+            }
+
+            break;
+        }
+        case stack_value_t::value:
+        case stack_value_t::boolean:
+            ret = args.pop_boolean();
+            break;
+        case stack_value_t::string:
+        case stack_value_t::error:
+            // ignore string type
+            args.pop_back();
+            break;
+        case stack_value_t::range_ref:
+        case stack_value_t::matrix:
+            // should not be called for non-single value.
+            throw formula_error(formula_error_t::general_error);
+    }
+
+    return ret;
+}
+
+/**
+ * Pop a value from the stack, and insert one or more numeric values to the
+ * specified sequence container.
+ */
+template<typename ContT>
+void append_values_from_stack(
+    const model_context& cxt, formula_value_stack& args, std::back_insert_iterator<ContT> insert_it)
+{
+    static_assert(
+        std::is_floating_point_v<typename ContT::value_type>,
+        "this function only supports a container of floating point values.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::boolean:
+        case stack_value_t::value:
+            insert_it = args.pop_value();
+            break;
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            auto ca = cxt.get_cell_access(addr);
+            switch (ca.get_value_type())
+            {
+                case cell_value_t::boolean:
+                    insert_it = ca.get_boolean_value() ? 1.0 : 0.0;
+                    break;
+                case cell_value_t::numeric:
+                    insert_it = ca.get_numeric_value();
+                    break;
+                default:;
+            }
+            break;
+        }
+        case stack_value_t::range_ref:
+        {
+            const formula_result_wait_policy_t wait_policy = cxt.get_formula_result_wait_policy();
+            abs_range_t range = args.pop_range_ref();
+
+            column_block_callback_t cb = [&insert_it, wait_policy](
+                col_t col, row_t row1, row_t row2, const column_block_shape_t& node)
+            {
+                assert(row1 <= row2);
+                row_t length = row2 - row1 + 1;
+
+                switch (node.type)
+                {
+                    case column_block_t::boolean:
+                    {
+                        auto blk_range = detail::make_element_range<column_block_t::boolean>{}(node, length);
+                        auto func = [](bool b) { return b ? 1.0 : 0.0; };
+                        std::transform(blk_range.begin(), blk_range.end(), insert_it, func);
+                        break;
+                    }
+                    case column_block_t::numeric:
+                    {
+                        auto blk_range = detail::make_element_range<column_block_t::numeric>{}(node, length);
+                        std::copy(blk_range.begin(), blk_range.end(), insert_it);
+                        break;
+                    }
+                    case column_block_t::formula:
+                    {
+                        auto blk_range = detail::make_element_range<column_block_t::formula>{}(node, length);
+
+                        for (const formula_cell* fc : blk_range)
+                        {
+                            formula_result res = fc->get_result_cache(wait_policy);
+                            switch (res.get_type())
+                            {
+                                case formula_result::result_type::boolean:
+                                    insert_it = res.get_boolean() ? 1.0 : 0.0;
+                                    break;
+                                case formula_result::result_type::value:
+                                    insert_it = res.get_value();
+                                    break;
+                                default:;
+                            }
+                        }
+
+                        break;
+                    }
+                    default:;
+                }
+                return true;
+            };
+
+            for (sheet_t sheet = range.first.sheet; sheet <= range.last.sheet; ++sheet)
+                cxt.walk(sheet, range, cb);
+
+            break;
+        }
+        default:
+            args.pop_back();
+    }
+}
+
 } // anonymous namespace
 
 // ============================================================================
 
-formula_functions::invalid_arg::invalid_arg(const string& msg) :
+formula_functions::invalid_arg::invalid_arg(const std::string& msg) :
     general_error(msg) {}
 
 formula_function_t formula_functions::get_function_opcode(const formula_token& token)
 {
-    assert(token.get_opcode() == fop_function);
-    return static_cast<formula_function_t>(token.get_uint32());
+    assert(token.opcode == fop_function);
+    return std::get<formula_function_t>(token.value);
 }
 
 formula_function_t formula_functions::get_function_opcode(std::string_view s)
@@ -464,8 +619,8 @@ std::string_view formula_functions::get_function_name(formula_function_t oc)
     return unknown_func_name;
 }
 
-formula_functions::formula_functions(iface::formula_model_access& cxt) :
-    m_context(cxt)
+formula_functions::formula_functions(model_context& cxt, const abs_address_t& pos) :
+    m_context(cxt), m_pos(pos)
 {
 }
 
@@ -475,62 +630,196 @@ formula_functions::~formula_functions()
 
 void formula_functions::interpret(formula_function_t oc, formula_value_stack& args)
 {
-    switch (oc)
+    try
     {
-        case formula_function_t::func_average:
-            fnc_average(args);
-            break;
-        case formula_function_t::func_concatenate:
-            fnc_concatenate(args);
-            break;
-        case formula_function_t::func_counta:
-            fnc_counta(args);
-            break;
-        case formula_function_t::func_if:
-            fnc_if(args);
-            break;
-        case formula_function_t::func_int:
-            fnc_int(args);
-            break;
-        case formula_function_t::func_left:
-            fnc_left(args);
-            break;
-        case formula_function_t::func_len:
-            fnc_len(args);
-            break;
-        case formula_function_t::func_max:
-            fnc_max(args);
-            break;
-        case formula_function_t::func_min:
-            fnc_min(args);
-            break;
-        case formula_function_t::func_mmult:
-            fnc_mmult(args);
-            break;
-        case formula_function_t::func_now:
-            fnc_now(args);
-            break;
-        case formula_function_t::func_pi:
-            fnc_pi(args);
-            break;
-        case formula_function_t::func_subtotal:
-            fnc_subtotal(args);
-            break;
-        case formula_function_t::func_sum:
-            fnc_sum(args);
-            break;
-        case formula_function_t::func_wait:
-            fnc_wait(args);
-            break;
-        case formula_function_t::func_unknown:
-        default:
+        switch (oc)
         {
-            std::ostringstream os;
-            os << "formula function not implemented yet (name="
-                << get_formula_function_name(oc)
-                << ")";
-            throw not_implemented_error(os.str());
+            case formula_function_t::func_abs:
+                fnc_abs(args);
+                break;
+            case formula_function_t::func_and:
+                fnc_and(args);
+                break;
+            case formula_function_t::func_average:
+                fnc_average(args);
+                break;
+            case formula_function_t::func_column:
+                fnc_column(args);
+                break;
+            case formula_function_t::func_columns:
+                fnc_columns(args);
+                break;
+            case formula_function_t::func_concatenate:
+                fnc_concatenate(args);
+                break;
+            case formula_function_t::func_count:
+                fnc_count(args);
+                break;
+            case formula_function_t::func_counta:
+                fnc_counta(args);
+                break;
+            case formula_function_t::func_countblank:
+                fnc_countblank(args);
+                break;
+            case formula_function_t::func_exact:
+                fnc_exact(args);
+                break;
+            case formula_function_t::func_false:
+                fnc_false(args);
+                break;
+            case formula_function_t::func_find:
+                fnc_find(args);
+                break;
+            case formula_function_t::func_if:
+                fnc_if(args);
+                break;
+            case formula_function_t::func_isblank:
+                fnc_isblank(args);
+                break;
+            case formula_function_t::func_iserror:
+                fnc_iserror(args);
+                break;
+            case formula_function_t::func_iseven:
+                fnc_iseven(args);
+                break;
+            case formula_function_t::func_isformula:
+                fnc_isformula(args);
+                break;
+            case formula_function_t::func_islogical:
+                fnc_islogical(args);
+                break;
+            case formula_function_t::func_isna:
+                fnc_isna(args);
+                break;
+            case formula_function_t::func_isnontext:
+                fnc_isnontext(args);
+                break;
+            case formula_function_t::func_isnumber:
+                fnc_isnumber(args);
+                break;
+            case formula_function_t::func_isodd:
+                fnc_isodd(args);
+                break;
+            case formula_function_t::func_isref:
+                fnc_isref(args);
+                break;
+            case formula_function_t::func_istext:
+                fnc_istext(args);
+                break;
+            case formula_function_t::func_int:
+                fnc_int(args);
+                break;
+            case formula_function_t::func_left:
+                fnc_left(args);
+                break;
+            case formula_function_t::func_len:
+                fnc_len(args);
+                break;
+            case formula_function_t::func_max:
+                fnc_max(args);
+                break;
+            case formula_function_t::func_median:
+                fnc_median(args);
+                break;
+            case formula_function_t::func_mid:
+                fnc_mid(args);
+                break;
+            case formula_function_t::func_min:
+                fnc_min(args);
+                break;
+            case formula_function_t::func_mmult:
+                fnc_mmult(args);
+                break;
+            case formula_function_t::func_mode:
+                fnc_mode(args);
+                break;
+            case formula_function_t::func_n:
+                fnc_n(args);
+                break;
+            case formula_function_t::func_na:
+                fnc_na(args);
+                break;
+            case formula_function_t::func_not:
+                fnc_not(args);
+                break;
+            case formula_function_t::func_now:
+                fnc_now(args);
+                break;
+            case formula_function_t::func_or:
+                fnc_or(args);
+                break;
+            case formula_function_t::func_pi:
+                fnc_pi(args);
+                break;
+            case formula_function_t::func_replace:
+                fnc_replace(args);
+                break;
+            case formula_function_t::func_rept:
+                fnc_rept(args);
+                break;
+            case formula_function_t::func_right:
+                fnc_right(args);
+                break;
+            case formula_function_t::func_row:
+                fnc_row(args);
+                break;
+            case formula_function_t::func_rows:
+                fnc_rows(args);
+                break;
+            case formula_function_t::func_sheet:
+                fnc_sheet(args);
+                break;
+            case formula_function_t::func_sheets:
+                fnc_sheets(args);
+                break;
+            case formula_function_t::func_substitute:
+                fnc_substitute(args);
+                break;
+            case formula_function_t::func_subtotal:
+                fnc_subtotal(args);
+                break;
+            case formula_function_t::func_sum:
+                fnc_sum(args);
+                break;
+            case formula_function_t::func_t:
+                fnc_t(args);
+                break;
+            case formula_function_t::func_textjoin:
+                fnc_textjoin(args);
+                break;
+            case formula_function_t::func_trim:
+                fnc_trim(args);
+                break;
+            case formula_function_t::func_true:
+                fnc_true(args);
+                break;
+            case formula_function_t::func_type:
+                fnc_type(args);
+                break;
+            case formula_function_t::func_wait:
+                fnc_wait(args);
+                break;
+            case formula_function_t::func_unknown:
+            default:
+            {
+                std::ostringstream os;
+                os << "formula function not implemented yet (name="
+                    << get_formula_function_name(oc)
+                    << ")";
+                throw not_implemented_error(os.str());
+            }
         }
+    }
+    catch (const formula_error& e)
+    {
+        using t = std::underlying_type<formula_error_t>::type;
+        formula_error_t err = e.get_error();
+        if (static_cast<t>(err) >= 200u)
+            // re-throw if it's an internal error.
+            throw;
+
+        args.clear();
+        args.push_error(err);
     }
 }
 
@@ -549,6 +838,34 @@ void formula_functions::fnc_max(formula_value_stack& args) const
     args.push_value(ret);
 }
 
+void formula_functions::fnc_median(formula_value_stack& args) const
+{
+    if (args.empty())
+        throw formula_functions::invalid_arg("MEDIAN requires one or more arguments.");
+
+    std::vector<double> seq;
+
+    while (!args.empty())
+        append_values_from_stack(m_context, args, std::back_inserter(seq));
+
+    std::size_t mid_pos = seq.size() / 2;
+
+    if (seq.size() & 0x01)
+    {
+        // odd number of values
+        auto it_mid = seq.begin() + mid_pos;
+        std::nth_element(seq.begin(), it_mid, seq.end());
+        args.push_value(seq[mid_pos]);
+    }
+    else
+    {
+        // even number of values.  Take the average of the two mid values.
+        std::sort(seq.begin(), seq.end());
+        double v = seq[mid_pos - 1] + seq[mid_pos];
+        args.push_value(v / 2.0);
+    }
+}
+
 void formula_functions::fnc_min(formula_value_stack& args) const
 {
     if (args.empty())
@@ -562,6 +879,62 @@ void formula_functions::fnc_min(formula_value_stack& args) const
             ret = v;
     }
     args.push_value(ret);
+}
+
+void formula_functions::fnc_mode(formula_value_stack& args) const
+{
+    if (args.empty())
+        throw formula_functions::invalid_arg("MODE requires one or more arguments.");
+
+    std::vector<double> seq;
+
+    while (!args.empty())
+        append_values_from_stack(m_context, args, std::back_inserter(seq));
+
+    if (seq.empty())
+    {
+        args.push_error(formula_error_t::no_value_available);
+        return;
+    }
+
+    std::sort(seq.begin(), seq.end());
+
+    // keep counting the number of adjacent equal values in the sorted sequence.
+
+    using value_count_type = std::tuple<double, std::size_t>;
+    std::vector<value_count_type> value_counts;
+
+    for (auto it = seq.begin(); it != seq.end(); )
+    {
+        double cur_v = *it;
+        auto it_tail = std::find_if(it, seq.end(), [cur_v](double v) { return cur_v < v; });
+        std::size_t len = std::distance(it, it_tail);
+        value_counts.emplace_back(cur_v, len);
+        it = it_tail;
+    }
+
+    assert(!value_counts.empty());
+
+    // Sort the results by the frequency in descending order first, then the
+    // value in ascending order.
+    auto func_comp = [](value_count_type lhs, value_count_type rhs)
+    {
+        if (std::get<1>(lhs) > std::get<1>(rhs))
+            return true;
+
+        return std::get<0>(lhs) < std::get<0>(rhs);
+    };
+
+    std::sort(value_counts.begin(), value_counts.end(), func_comp);
+    auto [top_value, top_count] = value_counts[0];
+
+    if (top_count == 1)
+    {
+        args.push_error(formula_error_t::no_value_available);
+        return;
+    }
+
+    args.push_value(top_value);
 }
 
 void formula_functions::fnc_sum(formula_value_stack& args) const
@@ -578,7 +951,7 @@ void formula_functions::fnc_sum(formula_value_stack& args) const
         {
             case stack_value_t::range_ref:
                 ret += sum_matrix_elements(args.pop_range_value());
-            break;
+                break;
             case stack_value_t::single_ref:
             case stack_value_t::string:
             case stack_value_t::value:
@@ -592,42 +965,103 @@ void formula_functions::fnc_sum(formula_value_stack& args) const
     IXION_TRACE("function: sum end (result=" << ret << ")");
 }
 
+void formula_functions::fnc_count(formula_value_stack& args) const
+{
+    double ret = 0;
+
+    while (!args.empty())
+    {
+        switch (args.get_type())
+        {
+            case stack_value_t::value:
+                args.pop_back();
+                ++ret;
+                break;
+            case stack_value_t::range_ref:
+            {
+                abs_range_t range = args.pop_range_ref();
+                ret += m_context.count_range(range, value_numeric | value_boolean);
+                break;
+            }
+            case stack_value_t::single_ref:
+            {
+                abs_address_t pos = args.pop_single_ref();
+                abs_range_t range;
+                range.first = range.last = pos;
+                ret += m_context.count_range(range, value_numeric | value_boolean);
+                break;
+            }
+            default:
+                args.pop_back();
+        }
+    }
+
+    args.push_value(ret);
+}
+
 void formula_functions::fnc_counta(formula_value_stack& args) const
 {
-    if (args.empty())
-        throw formula_functions::invalid_arg("COUNTA requires one or more arguments.");
-
     double ret = 0;
+
     while (!args.empty())
     {
         switch (args.get_type())
         {
             case stack_value_t::string:
             case stack_value_t::value:
-                args.pop_value();
+                args.pop_back();
                 ++ret;
-            break;
+                break;
             case stack_value_t::range_ref:
             {
                 abs_range_t range = args.pop_range_ref();
                 ret += m_context.count_range(range, value_numeric | value_boolean | value_string);
+                break;
             }
-            break;
             case stack_value_t::single_ref:
             {
                 abs_address_t pos = args.pop_single_ref();
                 abs_range_t range;
                 range.first = range.last = pos;
                 ret += m_context.count_range(range, value_numeric | value_boolean | value_string);
+                break;
             }
-            break;
             default:
-                args.pop_value();
+                args.pop_back();
         }
 
     }
 
     args.push_value(ret);
+}
+
+void formula_functions::fnc_countblank(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("COUNTBLANK requires exactly 1 argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = args.pop_range_ref();
+            double ret = m_context.count_range(range, value_empty);
+            args.push_value(ret);
+            break;
+        }
+        default:
+            throw formula_functions::invalid_arg("COUNTBLANK only takes a reference argument.");
+    }
+}
+
+void formula_functions::fnc_abs(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ABS requires exactly 1 argument.");
+
+    double v = args.pop_value();
+    args.push_value(std::abs(v));
 }
 
 void formula_functions::fnc_average(formula_value_stack& args) const
@@ -658,8 +1092,8 @@ void formula_functions::fnc_average(formula_value_stack& args) const
                         ++count;
                     }
                 }
+                break;
             }
-            break;
             case stack_value_t::single_ref:
             case stack_value_t::string:
             case stack_value_t::value:
@@ -685,27 +1119,21 @@ void formula_functions::fnc_mmult(formula_value_stack& args) const
 
     while (!args.empty())
     {
-        switch (args.get_type())
+        if (mxp == mxp_end)
         {
-            case stack_value_t::range_ref:
-            {
-                if (mxp == mxp_end)
-                {
-                    is_arg_invalid = true;
-                    break;
-                }
-
-                matrix m = args.pop_range_value();
-                mxp->swap(m);
-                ++mxp;
-                break;
-            }
-            default:
-                is_arg_invalid = true;
+            is_arg_invalid = true;
+            break;
         }
 
-        if (is_arg_invalid)
+        auto m = args.maybe_pop_matrix();
+        if (!m)
+        {
+            is_arg_invalid = true;
             break;
+        }
+
+        mxp->swap(*m);
+        ++mxp;
     }
 
     if (mxp != mxp_end)
@@ -742,6 +1170,195 @@ void formula_functions::fnc_int(formula_value_stack& args) const
     args.push_value(std::floor(v));
 }
 
+void formula_functions::fnc_and(formula_value_stack& args) const
+{
+    const formula_result_wait_policy_t wait_policy = m_context.get_formula_result_wait_policy();
+    bool final_result = true;
+
+    while (!args.empty() && final_result)
+    {
+        switch (args.get_type())
+        {
+            case stack_value_t::single_ref:
+            case stack_value_t::value:
+            case stack_value_t::string:
+            {
+                std::optional<bool> v = pop_one_value_as_boolean(m_context, args);
+                if (v)
+                    final_result = *v;
+                break;
+            }
+            case stack_value_t::range_ref:
+            {
+                auto range = args.pop_range_ref();
+                sheet_t sheet = range.first.sheet;
+                abs_rc_range_t rc_range = range;
+
+                column_block_callback_t cb = [&final_result, wait_policy](
+                    col_t col, row_t row1, row_t row2, const column_block_shape_t& node)
+                {
+                    assert(row1 <= row2);
+                    row_t length = row2 - row1 + 1;
+
+                    switch (node.type)
+                    {
+                        case column_block_t::empty:
+                        case column_block_t::string:
+                        case column_block_t::unknown:
+                            // non-numeric blocks get skipped.
+                            break;
+                        case column_block_t::boolean:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::boolean>{}(node, length);
+                            bool res = std::all_of(blk_range.begin(), blk_range.end(), [](bool v) { return v; });
+                            final_result = res;
+                            break;
+                        }
+                        case column_block_t::numeric:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::numeric>{}(node, length);
+                            bool res = std::all_of(blk_range.begin(), blk_range.end(), [](double v) { return v != 0.0; });
+                            final_result = res;
+                            break;
+                        }
+                        case column_block_t::formula:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::formula>{}(node, length);
+
+                            for (const formula_cell* fc : blk_range)
+                            {
+                                formula_result res = fc->get_result_cache(wait_policy);
+                                switch (res.get_type())
+                                {
+                                    case formula_result::result_type::boolean:
+                                        final_result = res.get_boolean();
+                                        break;
+                                    case formula_result::result_type::value:
+                                        final_result = res.get_value() != 0.0;
+                                        break;
+                                    default:;
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+
+                    return final_result; // returning false will end the walk.
+                };
+
+                m_context.walk(sheet, rc_range, cb);
+                break;
+            }
+            default:
+                throw formula_error(formula_error_t::general_error);
+        }
+    }
+
+    args.clear();
+    args.push_boolean(final_result);
+}
+
+void formula_functions::fnc_or(formula_value_stack& args) const
+{
+    const formula_result_wait_policy_t wait_policy = m_context.get_formula_result_wait_policy();
+    bool final_result = false;
+
+    while (!args.empty())
+    {
+        bool this_result = false;
+
+        switch (args.get_type())
+        {
+            case stack_value_t::single_ref:
+            case stack_value_t::value:
+            case stack_value_t::string:
+            {
+                std::optional<bool> v = pop_one_value_as_boolean(m_context, args);
+                if (v)
+                    this_result = *v;
+                break;
+            }
+            case stack_value_t::range_ref:
+            {
+                auto range = args.pop_range_ref();
+                sheet_t sheet = range.first.sheet;
+                abs_rc_range_t rc_range = range;
+
+                // We will bail out of the walk on the first positive result.
+
+                column_block_callback_t cb = [&this_result, wait_policy](
+                    col_t col, row_t row1, row_t row2, const column_block_shape_t& node)
+                {
+                    assert(row1 <= row2);
+                    row_t length = row2 - row1 + 1;
+
+                    switch (node.type)
+                    {
+                        case column_block_t::empty:
+                        case column_block_t::string:
+                        case column_block_t::unknown:
+                            // non-numeric blocks get skipped.
+                            break;
+                        case column_block_t::boolean:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::boolean>{}(node, length);
+                            this_result = std::any_of(blk_range.begin(), blk_range.end(), [](bool v) { return v; });
+                            break;
+                        }
+                        case column_block_t::numeric:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::numeric>{}(node, length);
+                            this_result = std::any_of(blk_range.begin(), blk_range.end(), [](double v) { return v != 0.0; });
+                            break;
+                        }
+                        case column_block_t::formula:
+                        {
+                            auto blk_range = detail::make_element_range<column_block_t::formula>{}(node, length);
+
+                            for (const formula_cell* fc : blk_range)
+                            {
+                                formula_result res = fc->get_result_cache(wait_policy);
+                                switch (res.get_type())
+                                {
+                                    case formula_result::result_type::boolean:
+                                        this_result = res.get_boolean();
+                                        break;
+                                    case formula_result::result_type::value:
+                                        this_result = res.get_value() != 0.0;
+                                        break;
+                                    default:;
+                                }
+
+                                if (this_result)
+                                    break;
+                            }
+
+                            break;
+                        }
+                    }
+
+                    return !this_result; // returning false will end the walk.
+                };
+
+                m_context.walk(sheet, rc_range, cb);
+                break;
+            }
+            default:
+                throw formula_error(formula_error_t::general_error);
+        }
+
+        if (this_result)
+        {
+            final_result = true;
+            break;
+        }
+    }
+
+    args.clear();
+    args.push_boolean(final_result);
+}
+
 void formula_functions::fnc_if(formula_value_stack& args) const
 {
     if (args.size() != 3)
@@ -759,22 +1376,461 @@ void formula_functions::fnc_if(formula_value_stack& args) const
     args.swap(ret);
 }
 
+void formula_functions::fnc_true(formula_value_stack& args) const
+{
+    if (!args.empty())
+        throw formula_functions::invalid_arg("TRUE takes no arguments.");
+
+    args.push_boolean(true);
+}
+
+void formula_functions::fnc_false(formula_value_stack& args) const
+{
+    if (!args.empty())
+        throw formula_functions::invalid_arg("FALSE takes no arguments.");
+
+    args.push_boolean(false);
+}
+
+void formula_functions::fnc_not(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("NOT requires exactly one argument.");
+
+    args.push_boolean(!args.pop_boolean());
+}
+
+void formula_functions::fnc_isblank(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISBLANK requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_celltype(addr) == celltype_t::empty;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = args.pop_range_ref();
+            bool res = m_context.is_empty(range);
+            args.push_boolean(res);
+            break;
+        }
+        default:
+        {
+            args.clear();
+            args.push_boolean(false);
+        }
+    }
+}
+
+void formula_functions::fnc_iserror(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISERROR requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_cell_value_type(addr) == cell_value_t::error;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::error:
+        {
+            args.clear();
+            args.push_boolean(true);
+            break;
+        }
+        default:
+        {
+            args.clear();
+            args.push_boolean(false);
+        }
+    }
+}
+
+void formula_functions::fnc_iseven(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISEVEN requires exactly one argument.");
+
+    bool odd = pop_and_check_for_odd_value(args);
+    args.push_boolean(!odd);
+}
+
+void formula_functions::fnc_isformula(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISFORMULA requires exactly one argument.");
+
+    if (args.get_type() != stack_value_t::single_ref)
+    {
+        args.clear();
+        args.push_boolean(false);
+        return;
+    }
+
+    abs_address_t addr = args.pop_single_ref();
+    bool res = m_context.get_celltype(addr) == celltype_t::formula;
+    args.push_boolean(res);
+}
+
+void formula_functions::fnc_islogical(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISLOGICAL requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_cell_value_type(addr) == cell_value_t::boolean;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::boolean:
+            args.clear();
+            args.push_boolean(true);
+            break;
+        default:
+            args.clear();
+            args.push_boolean(false);
+    }
+}
+
+void formula_functions::fnc_isna(formula_value_stack& args) const
+{
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("ISNA requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            auto ca = m_context.get_cell_access(addr);
+            formula_error_t err = ca.get_error_value();
+            args.push_boolean(err == formula_error_t::no_value_available);
+            break;
+        }
+        case stack_value_t::error:
+        {
+            bool res = args.pop_error() == formula_error_t::no_value_available;
+            args.push_boolean(res);
+            break;
+        }
+        default:
+        {
+            args.clear();
+            args.push_boolean(false);
+        }
+    }
+}
+
+void formula_functions::fnc_isnontext(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISNONTEXT requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_cell_value_type(addr) != cell_value_t::string;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::string:
+            args.clear();
+            args.push_boolean(false);
+            break;
+        default:
+            args.clear();
+            args.push_boolean(true);
+    }
+}
+
+void formula_functions::fnc_isnumber(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISNUMBER requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_cell_value_type(addr) == cell_value_t::numeric;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::value:
+            args.clear();
+            args.push_boolean(true);
+            break;
+        default:
+            args.clear();
+            args.push_boolean(false);
+    }
+}
+
+void formula_functions::fnc_isodd(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISODD requires exactly one argument.");
+
+    bool odd = pop_and_check_for_odd_value(args);
+    args.push_boolean(odd);
+}
+
+void formula_functions::fnc_isref(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISREF requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+            args.clear();
+            args.push_boolean(true);
+            break;
+        default:
+            args.clear();
+            args.push_boolean(false);
+    }
+}
+
+void formula_functions::fnc_istext(formula_value_stack& args) const
+{
+    if (args.size() != 1)
+        throw formula_functions::invalid_arg("ISTEXT requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            bool res = m_context.get_cell_value_type(addr) == cell_value_t::string;
+            args.push_boolean(res);
+            break;
+        }
+        case stack_value_t::string:
+            args.clear();
+            args.push_boolean(true);
+            break;
+        default:
+            args.clear();
+            args.push_boolean(false);
+    }
+}
+
+void formula_functions::fnc_n(formula_value_stack& args) const
+{
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("N takes exactly one argument.");
+
+    double v = args.pop_value();
+    args.push_value(v);
+}
+
+void formula_functions::fnc_na(formula_value_stack& args) const
+{
+    if (!args.empty())
+        throw formula_functions::invalid_arg("NA takes no arguments.");
+
+    args.push_error(formula_error_t::no_value_available);
+}
+
+void formula_functions::fnc_type(formula_value_stack& args) const
+{
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("TYPE requires exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::boolean:
+            args.pop_back();
+            args.push_value(4);
+            break;
+        case stack_value_t::error:
+            args.pop_back();
+            args.push_value(16);
+            break;
+        case stack_value_t::matrix:
+        case stack_value_t::range_ref:
+            args.pop_back();
+            args.push_value(64);
+            break;
+        case stack_value_t::string:
+            args.pop_back();
+            args.push_value(2);
+            break;
+        case stack_value_t::value:
+            args.pop_back();
+            args.push_value(1);
+            break;
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            cell_access ca = m_context.get_cell_access(addr);
+
+            switch (ca.get_value_type())
+            {
+                case cell_value_t::boolean:
+                    args.push_value(4);
+                    break;
+                case cell_value_t::empty:
+                case cell_value_t::numeric:
+                    args.push_value(1);
+                    break;
+                case cell_value_t::error:
+                    args.push_value(16);
+                    break;
+                case cell_value_t::string:
+                    args.push_value(2);
+                    break;
+                case cell_value_t::unknown:
+                    throw formula_error(formula_error_t::no_result_error);
+            }
+
+            break;
+        }
+    }
+}
+
 void formula_functions::fnc_len(formula_value_stack& args) const
 {
     if (args.size() != 1)
         throw formula_functions::invalid_arg("LEN requires exactly one argument.");
 
-    string s = args.pop_string();
-    args.clear();
-    args.push_value(s.size());
+    std::string s = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(s);
+    args.push_value(positions.size());
+}
+
+void formula_functions::fnc_mid(formula_value_stack& args) const
+{
+    if (args.size() != 3)
+        throw formula_functions::invalid_arg("MID requires exactly 3 arguments.");
+
+    int len = std::floor(args.pop_value());
+    int start = std::floor(args.pop_value()); // 1-based
+
+    if (len < 0 || start < 1)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    std::string s = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(s);
+
+    start -= 1; // convert to 0-based start position
+
+    if (std::size_t(start) >= positions.size())
+    {
+        args.push_string(std::string{});
+        return;
+    }
+
+    std::size_t skip_front = positions[start];
+    std::size_t skip_back = 0;
+
+    int max_length = positions.size() - start;
+    if (len < max_length)
+        skip_back = s.size() - positions[start + len];
+
+    auto it_head = s.cbegin() + skip_front;
+    auto it_end = s.cend() - skip_back;
+
+    std::string truncated;
+    std::copy(it_head, it_end, std::back_inserter(truncated));
+    args.push_string(truncated);
 }
 
 void formula_functions::fnc_concatenate(formula_value_stack& args) const
 {
-    string s;
+    std::string s;
     while (!args.empty())
         s = args.pop_string() + s;
     args.push_string(std::move(s));
+}
+
+void formula_functions::fnc_exact(formula_value_stack& args) const
+{
+    if (args.size() != 2u)
+        throw formula_functions::invalid_arg("EXACT requires exactly 2 arguments.");
+
+    std::string right = args.pop_string();
+    std::string left = args.pop_string();
+
+    return args.push_boolean(right == left);
+}
+
+void formula_functions::fnc_find(formula_value_stack& args) const
+{
+    if (args.size() < 2u || args.size() > 3u)
+        throw formula_functions::invalid_arg("FIND requires at least 2 and no more than 3 arguments.");
+
+    int start_pos = 0;
+    if (args.size() == 3u)
+        start_pos = std::floor(args.pop_value()) - 1; // to 0-based
+
+    if (start_pos < 0)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    std::string content = args.pop_string();
+    std::string part = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(content);
+
+    // convert the logical utf-8 start position to a corresponding byte start position
+
+    if (std::size_t(start_pos) >= positions.size())
+    {
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    start_pos = positions[start_pos];
+    std::size_t pos = content.find(part, start_pos);
+
+    if (pos == std::string::npos)
+    {
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    // convert the byte position to a logical utf-8 character position.
+    auto it = std::lower_bound(positions.begin(), positions.end(), pos);
+
+    if (it == positions.end() || *it != pos)
+    {
+        // perhaps invalid utf-8 string...
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    pos = std::distance(positions.begin(), it);
+    args.push_value(pos + 1); // back to 1-based
 }
 
 void formula_functions::fnc_left(formula_value_stack& args) const
@@ -783,17 +1839,346 @@ void formula_functions::fnc_left(formula_value_stack& args) const
         throw formula_functions::invalid_arg(
             "LEFT requires at least one argument but no more than 2.");
 
-    size_t n = 1; // when the 2nd arg is skipped, it defaults to 1.
+    int n = 1; // when the 2nd arg is skipped, it defaults to 1.
     if (args.size() == 2)
         n = std::floor(args.pop_value());
 
-    string s = args.pop_string();
+    if (n < 0)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    std::string s = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(s);
 
     // Resize ONLY when the desired length is lower than the original string length.
-    if (n < s.size())
-        s.resize(n);
+    if (std::size_t(n) < positions.size())
+        s.resize(positions[n]);
 
     args.push_string(std::move(s));
+}
+
+void formula_functions::fnc_replace(formula_value_stack& args) const
+{
+    if (args.size() != 4u)
+        throw formula_functions::invalid_arg("REPLACE requires exactly 4 arguments.");
+
+    std::string new_text = args.pop_string();
+    int n_segment = std::floor(args.pop_value());
+    int pos_segment = std::floor(args.pop_value()) - 1; // to 0-based
+
+    if (n_segment < 0 || pos_segment < 0)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    std::string content = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(content);
+
+    pos_segment = std::min<int>(pos_segment, positions.size());
+    n_segment = std::min<int>(n_segment, positions.size() - pos_segment);
+
+    // convert to its byte position.
+    std::size_t pos_bytes = std::size_t(pos_segment) < positions.size() ? positions[pos_segment] : content.size();
+
+    // copy the leading segment.
+    auto it = std::next(content.begin(), pos_bytes);
+    std::string content_new{content.begin(), it};
+
+    content_new += new_text;
+
+    // copy the trailing segment.
+    std::size_t pos_logical = pos_segment + n_segment;
+    pos_bytes = pos_logical < positions.size() ? positions[pos_logical] : content.size();
+    it = std::next(content.begin(), pos_bytes);
+    std::copy(it, content.end(), std::back_inserter(content_new));
+
+    args.push_string(content_new);
+}
+
+void formula_functions::fnc_rept(formula_value_stack& args) const
+{
+    if (args.size() != 2u)
+        throw formula_functions::invalid_arg("REPT requires 2 arguments.");
+
+    int count = args.pop_value();
+    if (count < 0)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    std::string s = args.pop_string();
+    std::ostringstream os;
+    for (int i = 0; i < count; ++i)
+        os << s;
+
+    args.push_string(os.str());
+}
+
+void formula_functions::fnc_right(formula_value_stack& args) const
+{
+    if (args.empty() || args.size() > 2)
+        throw formula_functions::invalid_arg(
+            "RIGHT requires at least one argument but no more than 2.");
+
+    int n = 1; // when the 2nd arg is skipped, it defaults to 1.
+    if (args.size() == 2)
+        n = std::floor(args.pop_value());
+
+    if (n < 0)
+    {
+        args.clear();
+        args.push_error(formula_error_t::invalid_value_type);
+        return;
+    }
+
+    if (n == 0)
+    {
+        args.clear();
+        args.push_string(std::string{});
+        return;
+    }
+
+    std::string s = args.pop_string();
+
+    auto positions = detail::calc_utf8_byte_positions(s);
+
+    // determine how many logical characters to skip.
+    n = int(positions.size()) - n;
+
+    if (n > 0)
+    {
+        assert(std::size_t(n) < positions.size());
+        auto it = std::next(s.begin(), positions[n]);
+        std::string s_skipped;
+        std::copy(it, s.end(), std::back_inserter(s_skipped));
+        s.swap(s_skipped);
+    }
+
+    args.push_string(std::move(s));
+}
+
+void formula_functions::fnc_substitute(formula_value_stack& args) const
+{
+    if (args.size() < 3 || args.size() > 4)
+        throw formula_functions::invalid_arg(
+            "SUBSTITUTE requires at least 3 arguments but no more than 4.");
+
+    constexpr int replace_all = -1;
+    int which = replace_all;
+
+    if (args.size() == 4)
+    {
+        // explicit which value provided.
+        which = std::floor(args.pop_value());
+
+        if (which < 1)
+        {
+            args.clear();
+            args.push_error(formula_error_t::invalid_value_type);
+            return;
+        }
+    }
+
+    const std::string text_new = args.pop_string();
+    const std::string text_old = args.pop_string();
+    const std::string content = args.pop_string();
+    std::string content_new;
+
+    std::size_t pos = 0;
+    int which_found = 0;
+
+    while (true)
+    {
+        std::size_t found_pos = content.find(text_old, pos);
+        if (found_pos == std::string::npos)
+        {
+            // Copy the rest of the string to the new buffer and exit.
+            content_new.append(content, pos, std::string::npos);
+            break;
+        }
+
+        ++which_found;
+        bool replace_this = which_found == which || which == replace_all;
+        content_new.append(content, pos, found_pos - pos);
+        content_new.append(replace_this ? text_new : text_old);
+        pos = found_pos + text_old.size();
+    }
+
+    args.clear();
+    args.push_string(std::move(content_new));
+}
+
+void formula_functions::fnc_t(formula_value_stack& args) const
+{
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("T takes exactly one argument.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::string:
+            // Do nothing and reuse the string value as the return value.
+            break;
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            auto addr = args.pop_single_ref();
+            auto ca = m_context.get_cell_access(addr);
+
+            std::string s;
+
+            if (ca.get_value_type() == cell_value_t::string)
+                s = ca.get_string_value();
+
+            args.push_string(std::move(s));
+            break;
+        }
+        default:
+        {
+            args.pop_back();
+            args.push_string(std::string{});
+        }
+    }
+}
+
+void formula_functions::fnc_textjoin(formula_value_stack& args) const
+{
+    if (args.size() < 3u)
+        throw formula_functions::invalid_arg("TEXTJOIN requires at least 3 arguments.");
+
+    std::deque<abs_range_t> ranges;
+
+    while (args.size() > 2u)
+        ranges.push_front(args.pop_range_ref());
+
+    bool skip_empty = args.pop_boolean();
+    std::string delim = args.pop_string();
+    std::vector<std::string> tokens;
+
+    for (const abs_range_t& range : ranges)
+    {
+        for (sheet_t sheet = range.first.sheet; sheet <= range.last.sheet; ++sheet)
+        {
+            model_iterator miter = m_context.get_model_iterator(sheet, rc_direction_t::horizontal, range);
+
+            for (; miter.has(); miter.next())
+            {
+                auto& cell = miter.get();
+
+                switch (cell.type)
+                {
+                    case celltype_t::string:
+                    {
+                        auto sid = std::get<string_id_t>(cell.value);
+                        const std::string* s = m_context.get_string(sid);
+                        assert(s);
+                        tokens.emplace_back(*s);
+                        break;
+                    }
+                    case celltype_t::numeric:
+                    {
+                        std::ostringstream os;
+                        os << std::get<double>(cell.value);
+                        tokens.emplace_back(os.str());
+                        break;
+                    }
+                    case celltype_t::boolean:
+                    {
+                        std::ostringstream os;
+                        os << std::boolalpha << std::get<bool>(cell.value);
+                        tokens.emplace_back(os.str());
+                        break;
+                    }
+                    case celltype_t::formula:
+                    {
+                        const auto* fc = std::get<const formula_cell*>(cell.value);
+                        formula_result res = fc->get_result_cache(m_context.get_formula_result_wait_policy());
+                        tokens.emplace_back(res.str(m_context));
+                        break;
+                    }
+                    case celltype_t::empty:
+                    {
+                        if (!skip_empty)
+                            tokens.emplace_back();
+                        break;
+                    }
+                    case celltype_t::unknown:
+                        // logic error - this should never happen!
+                        throw formula_error(formula_error_t::no_result_error);
+                }
+            }
+        }
+    }
+
+    if (tokens.empty())
+    {
+        args.push_string(std::string{});
+        return;
+    }
+
+    std::string result = std::move(tokens.front());
+
+    for (auto it = std::next(tokens.begin()); it != tokens.end(); ++it)
+    {
+        result.append(delim);
+        result.append(*it);
+    }
+
+    args.push_string(std::move(result));
+}
+
+void formula_functions::fnc_trim(formula_value_stack& args) const
+{
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("TRIM takes exactly one argument.");
+
+    std::string s = args.pop_string();
+    const char* p = s.data();
+    const char* p_end = p + s.size();
+    const char* p_head = nullptr;
+
+    std::vector<std::string> tokens;
+
+    for (; p != p_end; ++p)
+    {
+        if (*p == ' ')
+        {
+            if (p_head)
+            {
+                tokens.emplace_back(p_head, std::distance(p_head, p));
+                p_head = nullptr;
+            }
+
+            continue;
+        }
+
+        if (!p_head)
+            // keep track of the head of each token.
+            p_head = p;
+    }
+
+    if (p_head)
+        tokens.emplace_back(p_head, std::distance(p_head, p));
+
+    if (tokens.empty())
+    {
+        args.push_string(std::string{});
+        return;
+    }
+
+    std::ostringstream os;
+    std::copy(tokens.cbegin(), std::prev(tokens.cend()), std::ostream_iterator<std::string>(os, " "));
+    os << tokens.back();
+
+    args.push_string(os.str());
 }
 
 void formula_functions::fnc_now(formula_value_stack& args) const
@@ -837,6 +2222,165 @@ void formula_functions::fnc_subtotal(formula_value_stack& args) const
             os << "SUBTOTAL: function type " << subtype << " not implemented yet";
             throw formula_functions::invalid_arg(os.str());
         }
+    }
+}
+
+void formula_functions::fnc_column(formula_value_stack& args) const
+{
+    if (args.empty())
+    {
+        args.push_value(m_pos.column + 1);
+        return;
+    }
+
+    if (args.size() > 1)
+        throw formula_functions::invalid_arg("COLUMN requires 1 argument or less.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            args.push_value(addr.column + 1);
+            break;
+        }
+        default:
+            throw formula_error(formula_error_t::invalid_value_type);
+    }
+}
+
+void formula_functions::fnc_columns(formula_value_stack& args) const
+{
+    double res = 0.0;
+
+    while (!args.empty())
+    {
+        switch (args.get_type())
+        {
+            case stack_value_t::single_ref:
+            case stack_value_t::range_ref:
+            {
+                abs_range_t range = args.pop_range_ref();
+                res += range.last.column - range.first.column + 1;
+                break;
+            }
+            default:
+                throw formula_error(formula_error_t::invalid_value_type);
+        }
+    }
+
+    args.push_value(res);
+}
+
+void formula_functions::fnc_row(formula_value_stack& args) const
+{
+    if (args.empty())
+    {
+        args.push_value(m_pos.row + 1);
+        return;
+    }
+
+    if (args.size() > 1)
+        throw formula_functions::invalid_arg("ROW requires 1 argument or less.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            abs_address_t addr = args.pop_single_ref();
+            args.push_value(addr.row + 1);
+            break;
+        }
+        default:
+            throw formula_error(formula_error_t::invalid_value_type);
+    }
+}
+
+void formula_functions::fnc_rows(formula_value_stack& args) const
+{
+    double res = 0.0;
+
+    while (!args.empty())
+    {
+        switch (args.get_type())
+        {
+            case stack_value_t::single_ref:
+            case stack_value_t::range_ref:
+            {
+                abs_range_t range = args.pop_range_ref();
+                res += range.last.row - range.first.row + 1;
+                break;
+            }
+            default:
+                throw formula_error(formula_error_t::invalid_value_type);
+        }
+    }
+
+    args.push_value(res);
+}
+
+void formula_functions::fnc_sheet(formula_value_stack& args) const
+{
+    if (args.empty())
+    {
+        // Take the current sheet index.
+        args.push_value(m_pos.sheet + 1);
+        return;
+    }
+
+    if (args.size() > 1u)
+        throw formula_functions::invalid_arg("SHEET only takes one argument or less.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = args.pop_range_ref();
+            args.push_value(range.first.sheet + 1);
+            break;
+        }
+        case stack_value_t::string:
+        {
+            // TODO: we need to make this case insensitive.
+            std::string sheet_name = args.pop_string();
+            sheet_t sheet_id = m_context.get_sheet_index(sheet_name);
+            if (sheet_id == invalid_sheet)
+                throw formula_error(formula_error_t::no_value_available);
+
+            args.push_value(sheet_id + 1);
+            break;
+        }
+        default:
+            throw formula_error(formula_error_t::invalid_value_type);
+    }
+}
+
+void formula_functions::fnc_sheets(formula_value_stack& args) const
+{
+    if (args.empty())
+    {
+        args.push_value(m_context.get_sheet_count());
+        return;
+    }
+
+    if (args.size() != 1u)
+        throw formula_functions::invalid_arg("SHEETS only takes one argument or less.");
+
+    switch (args.get_type())
+    {
+        case stack_value_t::single_ref:
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = args.pop_range_ref();
+            sheet_t n = range.last.sheet - range.first.sheet + 1;
+            args.push_value(n);
+            break;
+        }
+        default:
+            throw formula_error(formula_error_t::no_value_available);
     }
 }
 

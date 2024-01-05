@@ -12,8 +12,8 @@ Build-Depends-Arch:
  libboost-program-options-dev,
  libboost-system-dev,
  libboost-thread-dev,
- libmdds-dev (>= 2.0),
- libmdds-dev (<< 2.1~),
+ libmdds-dev (>= 2.1),
+ libmdds-dev (<< 2.2~),
  pkg-config,
  python3,
  python3-dev,
@@ -37,7 +37,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends:
- libixion-0.17-0 (= ${binary:Version}),
+ libixion-0.18-0 (= ${binary:Version}),
  ${misc:Depends},
 Description: general purpose formula parser & interpreter library -- development
  Ixion is a general purpose formula parser & interpreter that can calculate
@@ -46,7 +46,7 @@ Description: general purpose formula parser & interpreter library -- development
  This package contains headers, pkg-config file and static library for
  developing applications using Ixion.
 
-Package: libixion-0.17-0
+Package: libixion-0.18-0
 Architecture: any
 Multi-Arch: same
 Pre-Depends:

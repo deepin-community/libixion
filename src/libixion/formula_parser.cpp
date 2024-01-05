@@ -7,15 +7,11 @@
 
 #include "formula_parser.hpp"
 #include "ixion/formula_name_resolver.hpp"
-#include "ixion/interface/formula_model_access.hpp"
 
 #include "formula_functions.hpp"
-#include "concrete_formula_tokens.hpp"
 
 #include <iostream>
 #include <sstream>
-
-using namespace std;
 
 namespace ixion {
 
@@ -24,7 +20,7 @@ namespace {
 class ref_error : public general_error
 {
 public:
-    ref_error(const string& msg) :
+    ref_error(const std::string& msg) :
         general_error(msg) {}
 };
 
@@ -32,13 +28,13 @@ public:
 
 // ----------------------------------------------------------------------------
 
-formula_parser::parse_error::parse_error(const string& msg) :
+formula_parser::parse_error::parse_error(const std::string& msg) :
     general_error(msg) {}
 
 // ----------------------------------------------------------------------------
 
 formula_parser::formula_parser(
-    const lexer_tokens_t& tokens, iface::formula_model_access& cxt, const formula_name_resolver& resolver) :
+    const lexer_tokens_t& tokens, model_context& cxt, const formula_name_resolver& resolver) :
     m_itr_cur(tokens.end()),
     m_itr_end(tokens.end()),
     m_tokens(tokens),
@@ -60,10 +56,10 @@ void formula_parser::parse()
 {
     for (m_itr_cur = m_tokens.begin(); has_token(); next())
     {
-        const lexer_token_base& t = get_token();
-        lexer_opcode_t oc = t.get_opcode();
-        switch (oc)
+        switch (get_token().opcode)
         {
+            case lexer_opcode_t::array_open:
+            case lexer_opcode_t::array_close:
             case lexer_opcode_t::open:
             case lexer_opcode_t::close:
             case lexer_opcode_t::plus:
@@ -74,22 +70,23 @@ void formula_parser::parse()
             case lexer_opcode_t::equal:
             case lexer_opcode_t::divide:
             case lexer_opcode_t::sep:
-                primitive(oc);
+            case lexer_opcode_t::array_row_sep:
+                primitive();
                 break;
             case lexer_opcode_t::name:
-                name(t);
+                name();
                 break;
             case lexer_opcode_t::string:
-                literal(t);
+                literal();
                 break;
             case lexer_opcode_t::value:
-                value(t);
+                value();
                 break;
             case lexer_opcode_t::less:
-                less(t);
+                less();
                 break;
             case lexer_opcode_t::greater:
-                greater(t);
+                greater();
                 break;
             default:
                 ;
@@ -97,19 +94,15 @@ void formula_parser::parse()
     }
 }
 
-void formula_parser::print_tokens() const
-{
-}
-
 formula_tokens_t& formula_parser::get_tokens()
 {
     return m_formula_tokens;
 }
 
-void formula_parser::primitive(lexer_opcode_t oc)
+void formula_parser::primitive()
 {
     fopcode_t foc = fop_unknown;
-    switch (oc)
+    switch (get_token().opcode)
     {
         case lexer_opcode_t::close:
             foc = fop_close;
@@ -141,28 +134,35 @@ void formula_parser::primitive(lexer_opcode_t oc)
         case lexer_opcode_t::sep:
             foc = fop_sep;
             break;
+        case lexer_opcode_t::array_row_sep:
+            foc = fop_array_row_sep;
+            break;
+        case lexer_opcode_t::array_open:
+            foc = fop_array_open;
+            break;
+        case lexer_opcode_t::array_close:
+            foc = fop_array_close;
+            break;
         default:
             throw parse_error("unknown primitive token received");
     }
-    m_formula_tokens.push_back(make_unique<opcode_token>(foc));
+    m_formula_tokens.emplace_back(foc);
 }
 
-void formula_parser::name(const lexer_token_base& t)
+void formula_parser::name()
 {
-    mem_str_buf name = t.get_string();
+    std::string_view name = std::get<std::string_view>(get_token().value);
 
-    formula_name_t fn = m_resolver.resolve({name.get(), name.size()}, m_pos);
+    formula_name_t fn = m_resolver.resolve(name, m_pos);
 
     switch (fn.type)
     {
         case formula_name_t::cell_reference:
-            m_formula_tokens.push_back(
-                make_unique<single_ref_token>(std::get<address_t>(fn.value)));
+            m_formula_tokens.emplace_back(std::get<address_t>(fn.value));
             break;
         case formula_name_t::range_reference:
         {
-            m_formula_tokens.push_back(
-                make_unique<range_ref_token>(std::get<range_t>(fn.value)));
+            m_formula_tokens.emplace_back(std::get<range_t>(fn.value));
             break;
         }
         case formula_name_t::table_reference:
@@ -173,78 +173,75 @@ void formula_parser::name(const lexer_token_base& t)
             table.column_first = m_context.add_string(src_table.column_first);
             table.column_last = m_context.add_string(src_table.column_last);
             table.areas = src_table.areas;
-            m_formula_tokens.push_back(make_unique<table_ref_token>(table));
+            m_formula_tokens.emplace_back(table);
             break;
         }
         case formula_name_t::function:
-            m_formula_tokens.push_back(make_unique<function_token>(std::get<formula_function_t>(fn.value)));
+            m_formula_tokens.emplace_back(std::get<formula_function_t>(fn.value));
             break;
         case formula_name_t::named_expression:
-            m_formula_tokens.push_back(
-                make_unique<named_exp_token>(name.get(), name.size()));
+            m_formula_tokens.emplace_back(std::string{name});
             break;
         default:
         {
             std::ostringstream os;
-            os << "failed to resolve a name token '" << name.str() << "'.";
+            os << "failed to resolve a name token '" << name << "'.";
             throw parse_error(os.str());
         }
     }
 }
 
-void formula_parser::literal(const lexer_token_base& t)
+void formula_parser::literal()
 {
-    mem_str_buf s = t.get_string();
-    string_id_t sid = m_context.add_string({s.get(), s.size()});
-    m_formula_tokens.push_back(make_unique<string_token>(sid));
+    string_id_t sid = m_context.add_string(std::get<std::string_view>(get_token().value));
+    m_formula_tokens.emplace_back(sid);
 }
 
-void formula_parser::value(const lexer_token_base& t)
+void formula_parser::value()
 {
-    double val = t.get_value();
-    m_formula_tokens.push_back(make_unique<value_token>(val));
+    m_formula_tokens.emplace_back(std::get<double>(get_token().value));
 }
 
-void formula_parser::less(const lexer_token_base& t)
+void formula_parser::less()
 {
     if (has_next())
     {
         next();
-        switch (get_token().get_opcode())
+        switch (get_token().opcode)
         {
             case lexer_opcode_t::equal:
-                m_formula_tokens.push_back(make_unique<opcode_token>(fop_less_equal));
+                m_formula_tokens.emplace_back(fop_less_equal);
                 return;
             case lexer_opcode_t::greater:
-                m_formula_tokens.push_back(make_unique<opcode_token>(fop_not_equal));
+                m_formula_tokens.emplace_back(fop_not_equal);
                 return;
             default:
                 ;
         }
         prev();
     }
-    m_formula_tokens.push_back(make_unique<opcode_token>(fop_less));
+    m_formula_tokens.emplace_back(fop_less);
 }
 
-void formula_parser::greater(const lexer_token_base& t)
+void formula_parser::greater()
 {
     if (has_next())
     {
         next();
-        if (get_token().get_opcode() == lexer_opcode_t::equal)
+        if (get_token().opcode == lexer_opcode_t::equal)
         {
-            m_formula_tokens.push_back(make_unique<opcode_token>(fop_greater_equal));
+            m_formula_tokens.emplace_back(fop_greater_equal);
             return;
         }
         prev();
     }
-    m_formula_tokens.push_back(make_unique<opcode_token>(fop_greater));
+    m_formula_tokens.emplace_back(fop_greater);
 
 }
 
-const lexer_token_base& formula_parser::get_token() const
+const lexer_token& formula_parser::get_token() const
 {
-    return **m_itr_cur;
+    return *m_itr_cur;
 }
 
 bool formula_parser::has_token() const

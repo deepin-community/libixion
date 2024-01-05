@@ -5,17 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/cell.hpp"
-#include "ixion/address.hpp"
-#include "ixion/exceptions.hpp"
-#include "ixion/formula_result.hpp"
-#include "ixion/formula_tokens.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/interface/session_handler.hpp"
-#include "ixion/global.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/formula_name_resolver.hpp"
-#include "ixion/formula.hpp"
+#include <ixion/cell.hpp>
+#include <ixion/address.hpp>
+#include <ixion/exceptions.hpp>
+#include <ixion/formula_result.hpp>
+#include <ixion/formula_tokens.hpp>
+#include <ixion/interface/session_handler.hpp>
+#include <ixion/global.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/formula_name_resolver.hpp>
+#include <ixion/formula.hpp>
+#include <ixion/model_context.hpp>
 
 #include "formula_interpreter.hpp"
 #include "debug.hpp"
@@ -40,7 +40,7 @@ namespace {
 
 #if IXION_LOGGING
 
-std::string gen_trace_output(const formula_cell& fc, const iface::formula_model_access& cxt, const abs_address_t& pos)
+[[maybe_unused]] std::string gen_trace_output(const formula_cell& fc, const model_context& cxt, const abs_address_t& pos)
 {
     auto resolver = formula_name_resolver::get(formula_name_resolver_t::excel_a1, &cxt);
     std::ostringstream os;
@@ -138,6 +138,8 @@ struct formula_cell::impl
 
         switch (m_calc_status->result->get_type())
         {
+            case formula_result::result_type::boolean:
+                return m_calc_status->result->get_boolean() ? 1.0 : 0.0;
             case formula_result::result_type::value:
                 return m_calc_status->result->get_value();
             case formula_result::result_type::matrix:
@@ -302,6 +304,9 @@ struct formula_cell::impl
 
             switch (result.get_type())
             {
+                case formula_result::result_type::boolean:
+                    m.set(m_group_pos.row, m_group_pos.column, result.get_boolean());
+                    break;
                 case formula_result::result_type::value:
                     m.set(m_group_pos.row, m_group_pos.column, result.get_value());
                     break;
@@ -364,7 +369,7 @@ std::string_view formula_cell::get_string(formula_result_wait_policy_t policy) c
     return mp_impl->fetch_string_from_result();
 }
 
-void formula_cell::interpret(iface::formula_model_access& context, const abs_address_t& pos)
+void formula_cell::interpret(model_context& context, const abs_address_t& pos)
 {
     IXION_TRACE(gen_trace_output(*this, context, pos));
 
@@ -412,17 +417,16 @@ void formula_cell::interpret(iface::formula_model_access& context, const abs_add
     status.cond.notify_all();
 }
 
-void formula_cell::check_circular(const iface::formula_model_access& cxt, const abs_address_t& pos)
+void formula_cell::check_circular(const model_context& cxt, const abs_address_t& pos)
 {
     // TODO: Check to make sure this is being run on the main thread only.
-    const formula_tokens_t& tokens = mp_impl->m_tokens->get();
-    for (const std::unique_ptr<formula_token>& t : tokens)
+    for (const formula_token& t : mp_impl->m_tokens->get())
     {
-        switch (t->get_opcode())
+        switch (t.opcode)
         {
             case fop_single_ref:
             {
-                abs_address_t addr = t->get_single_ref().to_abs(pos);
+                abs_address_t addr = std::get<address_t>(t.value).to_abs(pos);
                 const formula_cell* ref = cxt.get_formula_cell(addr);
 
                 if (!ref)
@@ -435,7 +439,7 @@ void formula_cell::check_circular(const iface::formula_model_access& cxt, const 
             }
             case fop_range_ref:
             {
-                abs_range_t range = t->get_range_ref().to_abs(pos);
+                abs_range_t range = std::get<range_t>(t.value).to_abs(pos);
                 for (sheet_t sheet = range.first.sheet; sheet <= range.last.sheet; ++sheet)
                 {
                     rc_size_t sheet_size = cxt.get_sheet_size();
@@ -488,22 +492,22 @@ void formula_cell::reset()
 }
 
 std::vector<const formula_token*> formula_cell::get_ref_tokens(
-    const iface::formula_model_access& cxt, const abs_address_t& pos) const
+    const model_context& cxt, const abs_address_t& pos) const
 {
     std::vector<const formula_token*> ret;
 
     std::function<void(const formula_tokens_t::value_type&)> get_refs = [&](const formula_tokens_t::value_type& t)
     {
-        switch (t->get_opcode())
+        switch (t.opcode)
         {
             case fop_single_ref:
             case fop_range_ref:
-                ret.push_back(t.get());
+                ret.push_back(&t);
                 break;
             case fop_named_expression:
             {
                 const named_expression_t* named_exp =
-                    cxt.get_named_expression(pos.sheet, t->get_name());
+                    cxt.get_named_expression(pos.sheet, std::get<std::string>(t.value));
 
                 if (!named_exp)
                     // silently ignore non-existing names.

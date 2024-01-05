@@ -8,21 +8,19 @@
 #ifndef INCLUDED_IXION_FORMULA_VALUE_STACK_HPP
 #define INCLUDED_IXION_FORMULA_VALUE_STACK_HPP
 
-#include "ixion/global.hpp"
+#include <ixion/address.hpp>
+#include <ixion/global.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/model_context.hpp>
+
+#include "impl_types.hpp"
 
 #include <deque>
+#include <variant>
+#include <ostream>
+#include <optional>
 
 namespace ixion {
-
-namespace iface {
-
-class formula_model_access;
-
-}
-
-struct abs_address_t;
-struct abs_range_t;
-class matrix;
 
 /**
  * Type of stack value which can be used as intermediate value during
@@ -30,6 +28,8 @@ class matrix;
  */
 enum class stack_value_t
 {
+    boolean,
+    error,
     value,
     string,
     single_ref,
@@ -37,31 +37,29 @@ enum class stack_value_t
     matrix,
 };
 
+std::ostream& operator<<(std::ostream& os, stack_value_t sv);
+
 /**
  * Individual stack value storage.
  */
 class stack_value
 {
-    stack_value_t m_type;
+    using stored_value_type = std::variant<bool, double, abs_address_t, abs_range_t, formula_error_t, matrix, std::string>;
 
-    union
-    {
-        double m_value;
-        abs_address_t* m_address;
-        abs_range_t* m_range;
-        matrix* m_matrix;
-        std::string* m_str;
-    };
+    stack_value_t m_type;
+    stored_value_type m_value;
 
 public:
     stack_value() = delete;
     stack_value(const stack_value&) = delete;
     stack_value& operator= (const stack_value&) = delete;
 
+    explicit stack_value(bool b);
     explicit stack_value(double val);
     explicit stack_value(std::string str);
     explicit stack_value(const abs_address_t& val);
     explicit stack_value(const abs_range_t& val);
+    explicit stack_value(formula_error_t err);
     explicit stack_value(matrix mtx);
     stack_value(stack_value&& other);
     ~stack_value();
@@ -69,10 +67,14 @@ public:
     stack_value& operator= (stack_value&& other);
 
     stack_value_t get_type() const;
+    bool get_boolean() const;
     double get_value() const;
     const std::string& get_string() const;
     const abs_address_t& get_address() const;
     const abs_range_t& get_range() const;
+    formula_error_t get_error() const;
+
+    const matrix& get_matrix() const;
 
     /**
      * Move the matrix value out from storage.  The internal matrix content
@@ -88,14 +90,14 @@ class formula_value_stack
 {
     typedef std::deque<stack_value> store_type;
     store_type m_stack;
-    const iface::formula_model_access& m_context;
+    const model_context& m_context;
 
 public:
     formula_value_stack() = delete;
     formula_value_stack(const formula_value_stack&) = delete;
     formula_value_stack& operator= (const formula_value_stack&) = delete;
 
-    explicit formula_value_stack(const iface::formula_model_access& cxt);
+    explicit formula_value_stack(const model_context& cxt);
 
     typedef store_type::value_type value_type;
     typedef store_type::iterator iterator;
@@ -118,17 +120,28 @@ public:
     double get_value(size_t pos) const;
 
     void push_back(value_type&& val);
+    void push_boolean(bool b);
     void push_value(double val);
     void push_string(std::string str);
     void push_single_ref(const abs_address_t& val);
     void push_range_ref(const abs_range_t& val);
     void push_matrix(matrix mtx);
+    void push_error(formula_error_t err);
 
+    bool pop_boolean();
     double pop_value();
-    const std::string pop_string();
+    std::string pop_string();
+    matrix pop_matrix();
+    std::optional<matrix> maybe_pop_matrix();
     abs_address_t pop_single_ref();
     abs_range_t pop_range_ref();
     matrix pop_range_value();
+    formula_error_t pop_error();
+
+    resolved_stack_value pop_matrix_or_numeric();
+    resolved_stack_value pop_matrix_or_string();
+
+    void pop_back();
 
     stack_value_t get_type() const;
 };

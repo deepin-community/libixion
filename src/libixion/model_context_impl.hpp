@@ -13,7 +13,6 @@
 #include "ixion/config.hpp"
 #include "ixion/dirty_cell_tracker.hpp"
 
-#include "mem_str_buf.hpp"
 #include "workbook.hpp"
 #include "column_store_type.hpp"
 
@@ -21,12 +20,13 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
+#include <deque>
 
 namespace ixion { namespace detail {
 
 class safe_string_pool
 {
-    using string_pool_type = std::vector<std::unique_ptr<std::string>>;
+    using string_pool_type = std::deque<std::string>;
     using string_map_type = std::unordered_map<std::string_view, string_id_t>;
 
     std::mutex m_mtx;
@@ -123,7 +123,9 @@ public:
     abs_range_t get_data_range(sheet_t sheet) const;
 
     bool is_empty(const abs_address_t& addr) const;
+    bool is_empty(abs_range_t range) const;
     celltype_t get_celltype(const abs_address_t& addr) const;
+    cell_value_t get_cell_value_type(const abs_address_t& addr) const;
     double get_numeric_value(const abs_address_t& addr) const;
     bool get_boolean_value(const abs_address_t& addr) const;
     string_id_t get_string_identifier(const abs_address_t& addr) const;
@@ -142,6 +144,7 @@ public:
 
     sheet_t get_sheet_index(std::string_view name) const;
     std::string get_sheet_name(sheet_t sheet) const;
+    void set_sheet_name(sheet_t sheet, std::string name);
     rc_size_t get_sheet_size() const;
     size_t get_sheet_count() const;
     sheet_t append_sheet(std::string&& name);
@@ -157,7 +160,9 @@ public:
     const column_store_t* get_column(sheet_t sheet, col_t col) const;
     const column_stores_t* get_columns(sheet_t sheet) const;
 
-    double count_range(const abs_range_t& range, const values_t& values_type) const;
+    double count_range(abs_range_t range, values_t values_type) const;
+
+    void walk(sheet_t sheet, const abs_rc_range_t& range, column_block_callback_t cb) const;
 
     bool empty() const;
 
@@ -170,6 +175,9 @@ public:
 
     model_iterator get_model_iterator(
         sheet_t sheet, rc_direction_t dir, const abs_rc_range_t& range) const;
+
+private:
+    abs_range_t shrink_to_workbook(abs_range_t range) const;
 
 private:
     model_context& m_parent;

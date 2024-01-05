@@ -5,13 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/model_context.hpp"
-#include "ixion/formula_result.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/model_iterator.hpp"
-#include "ixion/interface/session_handler.hpp"
-#include "ixion/named_expressions_iterator.hpp"
-#include "ixion/cell_access.hpp"
+#include <ixion/model_context.hpp>
+#include <ixion/formula_result.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/model_iterator.hpp>
+#include <ixion/interface/session_handler.hpp>
+#include <ixion/named_expressions_iterator.hpp>
+#include <ixion/cell_access.hpp>
+#include <ixion/exceptions.hpp>
 
 #include "model_context_impl.hpp"
 
@@ -165,9 +166,19 @@ bool model_context::is_empty(const abs_address_t& addr) const
     return mp_impl->is_empty(addr);
 }
 
+bool model_context::is_empty(const abs_range_t& range) const
+{
+    return mp_impl->is_empty(range);
+}
+
 celltype_t model_context::get_celltype(const abs_address_t& addr) const
 {
     return mp_impl->get_celltype(addr);
+}
+
+cell_value_t model_context::get_cell_value_type(const abs_address_t& addr) const
+{
+    return mp_impl->get_cell_value_type(addr);
 }
 
 double model_context::get_numeric_value(const abs_address_t& addr) const
@@ -215,7 +226,7 @@ formula_result model_context::get_formula_result(const abs_address_t& addr) cons
     return mp_impl->get_formula_result(addr);
 }
 
-double model_context::count_range(const abs_range_t& range, const values_t& values_type) const
+double model_context::count_range(const abs_range_t& range, values_t values_type) const
 {
     return mp_impl->count_range(range, values_type);
 }
@@ -302,6 +313,11 @@ sheet_t model_context::get_sheet_index(std::string_view name) const
 std::string model_context::get_sheet_name(sheet_t sheet) const
 {
     return mp_impl->get_sheet_name(sheet);
+}
+
+void model_context::set_sheet_name(sheet_t sheet, std::string name)
+{
+    mp_impl->set_sheet_name(sheet, std::move(name));
 }
 
 rc_size_t model_context::get_sheet_size() const
@@ -391,6 +407,12 @@ named_expressions_iterator model_context::get_named_expressions_iterator() const
 named_expressions_iterator model_context::get_named_expressions_iterator(sheet_t sheet) const
 {
     return named_expressions_iterator(*this, sheet);
+}
+
+void model_context::walk(
+    sheet_t sheet, const abs_rc_range_t& range, column_block_callback_t cb) const
+{
+    mp_impl->walk(sheet, range, std::move(cb));
 }
 
 bool model_context::empty() const

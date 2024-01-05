@@ -5,7 +5,7 @@ Depends:
 
 Tests: unit
 Depends:
- libixion-0.17-0,
+ libixion-0.18-0,
  python3-ixion,
  @builddeps@,
 Restrictions: build-needed, rw-build-tree
