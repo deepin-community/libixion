@@ -10,17 +10,19 @@
 #include <ixion/global.hpp>
 #include <ixion/macros.hpp>
 
+#include <sstream>
+
 namespace ixion {
 
 std::string_view get_opcode_name(fopcode_t oc)
 {
     // Make sure the names are ordered identically to the ordering of the enum members.
-    static const std::string_view names[] = {
+    static constexpr std::string_view names[] = {
         "unknown", // fop_unknown
-        "single ref", // fop_single_ref
-        "range ref", // fop_range_ref
-        "table ref", // fop_table_ref
-        "named expression", // fop_named_expression
+        "single-ref", // fop_single_ref
+        "range-ref", // fop_range_ref
+        "table-ref", // fop_table_ref
+        "named-expression", // fop_named_expression
         "string", // fop_string
         "value", // fop_value
         "function", // fop_function
@@ -31,18 +33,21 @@ std::string_view get_opcode_name(fopcode_t oc)
         "exponent", // fop_exponent
         "concat", // fop_concat
         "equal", // fop_equal
-        "not equal", // fop_not_equal
+        "not-equal", // fop_not_equal
         "less", // fop_less
         "greater", // fop_greater
-        "less equal", // fop_less_equal
-        "greater equal", // fop_greater_equal
+        "less-equal", // fop_less_equal
+        "greater-equal", // fop_greater_equal
         "open", // fop_open
         "close", // fop_close
         "sep", // fop_sep
+        "array-row-sep", // fop_array_row_sep
+        "array-open", // fop_array_open
+        "array-close", // fop_array_close
         "error", // fop_error
     };
 
-    if (std::size_t(oc) >= IXION_N_ELEMENTS(names))
+    if (std::size_t(oc) >= std::size(names))
         return "???";
 
     return names[oc];
@@ -50,10 +55,10 @@ std::string_view get_opcode_name(fopcode_t oc)
 
 std::string_view get_formula_opcode_string(fopcode_t oc)
 {
-    static const char* empty = "";
+    static constexpr std::string_view empty = "";
 
     // Make sure the names are ordered identically to the ordering of the enum members.
-    static const std::string_view names[] = {
+    static constexpr std::string_view names[] = {
         empty, // fop_unknown
         empty, // fop_single_ref
         empty, // fop_range_ref
@@ -77,10 +82,13 @@ std::string_view get_formula_opcode_string(fopcode_t oc)
         "(", // fop_open
         ")", // fop_close
         empty, // fop_sep
+        empty, // fop_array_row_sep
+        "{",   // fop_array_open
+        "}",   // fop_array_close
         empty, // fop_error
     };
 
-    if (std::size_t(oc) >= IXION_N_ELEMENTS(names))
+    if (std::size_t(oc) >= std::size(names))
         return empty;
 
     return names[oc];
@@ -89,96 +97,74 @@ std::string_view get_formula_opcode_string(fopcode_t oc)
 // ============================================================================
 
 formula_token::formula_token(fopcode_t op) :
-    m_opcode(op)
+    opcode(op)
+{
+    switch (opcode)
+    {
+        case fop_single_ref:
+        case fop_range_ref:
+        case fop_table_ref:
+        case fop_named_expression:
+        case fop_string:
+        case fop_value:
+        case fop_function:
+        {
+            std::ostringstream os;
+            os << "this opcode named '" << get_opcode_name(op) << "' cannot be instantiated by this constructor";
+            throw std::invalid_argument(os.str());
+        }
+        default:;
+    }
+}
+
+formula_token::formula_token(const address_t& addr) :
+    opcode(fop_single_ref), value(addr)
 {
 }
 
-formula_token::formula_token(const formula_token& r) :
-    m_opcode(r.m_opcode)
+formula_token::formula_token(const range_t& range) :
+    opcode(fop_range_ref), value(range)
 {
 }
 
-formula_token::~formula_token()
+formula_token::formula_token(const table_t& table) :
+    opcode(fop_table_ref), value(table)
 {
 }
 
-fopcode_t formula_token::get_opcode() const
+formula_token::formula_token(formula_function_t func) :
+    opcode(fop_function), value(func)
 {
-    return m_opcode;
 }
+
+formula_token::formula_token(double v) :
+    opcode(fop_value), value(v)
+{
+}
+
+formula_token::formula_token(string_id_t sid) :
+    opcode(fop_string), value(sid)
+{
+}
+
+formula_token::formula_token(std::string name) :
+    opcode(fop_named_expression), value(std::move(name))
+{
+}
+
+
+formula_token::formula_token(const formula_token& r) = default;
+formula_token::formula_token(formula_token&& r) = default;
+formula_token::~formula_token() = default;
 
 bool formula_token::operator== (const formula_token& r) const
 {
-    if (m_opcode != r.m_opcode)
-        return false;
-
-    switch (m_opcode)
-    {
-        case fop_close:
-        case fop_divide:
-        case fop_minus:
-        case fop_multiply:
-        case fop_exponent:
-        case fop_concat:
-        case fop_open:
-        case fop_plus:
-        case fop_sep:
-            return true;
-        case fop_single_ref:
-            return get_single_ref() == r.get_single_ref();
-        case fop_range_ref:
-            return get_range_ref() == r.get_range_ref();
-        case fop_named_expression:
-            return get_name() == r.get_name();
-        case fop_string:
-            return get_uint32() == r.get_uint32();
-        case fop_value:
-            return get_value() == r.get_value();
-        case fop_function:
-            return get_uint32() == r.get_uint32();
-        default:
-            ;
-    }
-    return false;
+    return opcode == r.opcode && value == r.value;
 }
 
 bool formula_token::operator!= (const formula_token& r) const
 {
     return !operator== (r);
-}
-
-address_t formula_token::get_single_ref() const
-{
-    return address_t();
-}
-
-range_t formula_token::get_range_ref() const
-{
-    return range_t();
-}
-
-table_t formula_token::get_table_ref() const
-{
-    return table_t();
-}
-
-double formula_token::get_value() const
-{
-    return 0.0;
-}
-
-uint32_t formula_token::get_uint32() const
-{
-    return 0;
-}
-
-std::string formula_token::get_name() const
-{
-    return std::string();
-}
-
-void formula_token::write_string(std::ostream& /*os*/) const
-{
 }
 
 struct formula_tokens_store::impl
@@ -238,24 +224,77 @@ named_expression_t::named_expression_t(named_expression_t&& other) :
 
 named_expression_t::~named_expression_t() {}
 
-bool operator== (const formula_tokens_t& left, const formula_tokens_t& right)
-{
-    size_t n = left.size();
-    if (n != right.size())
-        return false;
-
-    formula_tokens_t::const_iterator itr = left.begin(), itr_end = left.end(), itr2 = right.begin();
-    for (; itr != itr_end; ++itr, ++itr2)
-    {
-        if (*itr != *itr2)
-            return false;
-    }
-    return true;
-}
-
 std::ostream& operator<< (std::ostream& os, const formula_token& ft)
 {
-    ft.write_string(os);
+    switch (ft.opcode)
+    {
+        case fop_string:
+        {
+            os << "string token: (identifier=" << std::get<string_id_t>(ft.value) << ")";
+            break;
+        }
+        case fop_value:
+        {
+            os << "value token: " << std::get<double>(ft.value);
+            break;
+        }
+        case fop_single_ref:
+        {
+            os << "single ref token: " << std::get<address_t>(ft.value);
+            break;
+        }
+        case fop_range_ref:
+        {
+            os << "range ref token: " << std::get<range_t>(ft.value);
+            break;
+        }
+        case fop_table_ref:
+        {
+            os << "table ref token: " << std::get<table_t>(ft.value);
+            break;
+        }
+        case fop_named_expression:
+        {
+            os << "named expression token: '" << std::get<std::string>(ft.value) << "'";
+            break;
+        }
+        case fop_function:
+        {
+            using _int_type = std::underlying_type_t<formula_function_t>;
+
+            formula_function_t v = std::get<formula_function_t>(ft.value);
+            os << "function token: (opcode=" << _int_type(v) << "; name='" << get_formula_function_name(v) << "')";
+            break;
+        }
+        case fop_error:
+        {
+            os << "invalid error token: (count=" << std::get<string_id_t>(ft.value) << ")";
+            break;
+        }
+        case fop_plus:
+        case fop_minus:
+        case fop_divide:
+        case fop_multiply:
+        case fop_exponent:
+        case fop_concat:
+        case fop_equal:
+        case fop_not_equal:
+        case fop_less:
+        case fop_greater:
+        case fop_less_equal:
+        case fop_greater_equal:
+        case fop_open:
+        case fop_close:
+        case fop_sep:
+        case fop_array_row_sep:
+        case fop_array_open:
+        case fop_array_close:
+        case fop_unknown:
+            os << "opcode token: (name=" << get_opcode_name(ft.opcode) << "; s='"
+                << get_formula_opcode_string(ft.opcode) << "')";
+            break;
+    }
+
     return os;
 }
 

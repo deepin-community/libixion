@@ -13,10 +13,29 @@
 #include <iostream>
 #include <sstream>
 #include <cctype>
-
-using namespace std;
+#include <unordered_map>
 
 namespace ixion {
+
+namespace {
+
+const std::unordered_map<char, lexer_opcode_t> ops_map = {
+    { '&', lexer_opcode_t::concat },
+    { '(', lexer_opcode_t::open },
+    { ')', lexer_opcode_t::close },
+    { '*', lexer_opcode_t::multiply },
+    { '+', lexer_opcode_t::plus },
+    { '-', lexer_opcode_t::minus },
+    { '/', lexer_opcode_t::divide },
+    { '<', lexer_opcode_t::less },
+    { '=', lexer_opcode_t::equal },
+    { '>', lexer_opcode_t::greater },
+    { '^', lexer_opcode_t::exponent },
+    { '{', lexer_opcode_t::array_open },
+    { '}', lexer_opcode_t::array_close },
+};
+
+} // anonymous namespace
 
 class tokenizer
 {
@@ -33,6 +52,7 @@ public:
     explicit tokenizer(lexer_tokens_t& tokens, const char* p, size_t n) :
         m_tokens(tokens),
         m_sep_arg(','),
+        m_sep_array_row(';'),
         m_sep_decimal('.'),
         mp_first(p),
         mp_char(NULL),
@@ -49,6 +69,7 @@ public:
 
 private:
     bool is_arg_sep(char c) const;
+    bool is_array_row_sep(char c) const;
     bool is_decimal_sep(char c) const;
     bool is_op(char c) const;
 
@@ -69,6 +90,7 @@ private:
     lexer_tokens_t& m_tokens;
 
     char m_sep_arg;
+    char m_sep_array_row;
     char m_sep_decimal;
 
     const char* mp_first;
@@ -103,10 +125,20 @@ void tokenizer::run()
             continue;
         }
 
-        if (!is_op(*mp_char))
+        if (auto it = ops_map.find(*mp_char); it != ops_map.end())
         {
-            name();
+            op(it->second);
             continue;
+        }
+
+        switch (*mp_char)
+        {
+            case ' ':
+                space();
+                continue;
+            case '"':
+                string();
+                continue;
         }
 
         if (is_arg_sep(*mp_char))
@@ -115,48 +147,13 @@ void tokenizer::run()
             continue;
         }
 
-        switch (*mp_char)
+        if (is_array_row_sep(*mp_char))
         {
-            case ' ':
-                space();
-                break;
-            case '+':
-                op(lexer_opcode_t::plus);
-                break;
-            case '-':
-                op(lexer_opcode_t::minus);
-                break;
-            case '/':
-                op(lexer_opcode_t::divide);
-                break;
-            case '*':
-                op(lexer_opcode_t::multiply);
-                break;
-            case '^':
-                op(lexer_opcode_t::exponent);
-                break;
-            case '&':
-                op(lexer_opcode_t::concat);
-                break;
-            case '=':
-                op(lexer_opcode_t::equal);
-                break;
-            case '<':
-                op(lexer_opcode_t::less);
-                break;
-            case '>':
-                op(lexer_opcode_t::greater);
-                break;
-            case '(':
-                op(lexer_opcode_t::open);
-                break;
-            case ')':
-                op(lexer_opcode_t::close);
-                break;
-            case '"':
-                string();
-                break;
+            op(lexer_opcode_t::array_row_sep);
+            continue;
         }
+
+        name();
     }
 }
 
@@ -170,6 +167,11 @@ bool tokenizer::is_arg_sep(char c) const
     return c == m_sep_arg;
 }
 
+bool tokenizer::is_array_row_sep(char c) const
+{
+    return c == m_sep_array_row;
+}
+
 bool tokenizer::is_decimal_sep(char c) const
 {
     return c == m_sep_decimal;
@@ -180,21 +182,13 @@ bool tokenizer::is_op(char c) const
     if (is_arg_sep(c))
         return true;
 
+    if (ops_map.count(c) > 0)
+        return true;
+
     switch (*mp_char)
     {
         case ' ':
-        case '+':
-        case '-':
-        case '/':
-        case '*':
-        case '(':
-        case ')':
         case '"':
-        case '=':
-        case '<':
-        case '>':
-        case '^':
-        case '&':
             return true;
     }
     return false;
@@ -234,7 +228,7 @@ void tokenizer::numeral()
         return;
     }
     double val = to_double({p, len});
-    m_tokens.push_back(make_unique<lexer_value_token>(val));
+    m_tokens.emplace_back(val);
 }
 
 void tokenizer::space()
@@ -277,12 +271,12 @@ void tokenizer::name()
             break;
     }
 
-    m_tokens.push_back(make_unique<lexer_name_token>(p, len));
+    m_tokens.emplace_back(lexer_opcode_t::name, std::string_view{p, len});
 }
 
 void tokenizer::op(lexer_opcode_t oc)
 {
-    m_tokens.push_back(make_unique<lexer_token>(oc));
+    m_tokens.emplace_back(oc);
     next();
 }
 
@@ -294,7 +288,7 @@ void tokenizer::string()
     for (; *mp_char != '"' && has_char(); ++len)
         next();
 
-    m_tokens.push_back(make_unique<lexer_string_token>(p, len));
+    m_tokens.emplace_back(lexer_opcode_t::string, std::string_view{p, len});
 
     if (*mp_char == '"')
         next();
@@ -328,7 +322,7 @@ bool tokenizer::has_char() const
 
 // ============================================================================
 
-formula_lexer::tokenize_error::tokenize_error(const string& msg) : general_error(msg) {}
+formula_lexer::tokenize_error::tokenize_error(const std::string& msg) : general_error(msg) {}
 
 formula_lexer::formula_lexer(const config& config, const char* p, size_t n) :
     m_config(config), mp_first(p), m_size(n) {}

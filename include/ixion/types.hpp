@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <string_view>
+#include <functional>
 
 namespace ixion {
 
@@ -35,7 +36,7 @@ using rc_t = row_t;
  * String ID type.
  *
  * All string values are converted into integer tokens. You need to call the
- * get_string() method of ixion::iface::formula_model_access to get the
+ * get_string() method of ixion::model_context to get the
  * actual string value.
  */
 using string_id_t = uint32_t;
@@ -185,6 +186,7 @@ enum class formula_error_t : uint8_t
     name_not_found           = 4,
     no_range_intersection    = 5,
     invalid_value_type       = 6,
+    no_value_available       = 7,
 
     no_result_error          = 253, // internal only error
     stack_error              = 254, // internal only error
@@ -197,13 +199,30 @@ enum class formula_error_t : uint8_t
  */
 enum class formula_result_wait_policy_t
 {
+    /**
+     * Querying for the result of a formula cell will block until the
+     * calculation is complete.
+     */
     block_until_done,
+
+    /**
+     * Querying for the result of a formula cell that has not yet been
+     * calculated will throw an exception.
+     */
     throw_exception,
 };
 
+/**
+ * Formula event type used for event notification during calculation of
+ * formula cells.
+ *
+ * @see ixion::model_context::notify
+ */
 enum class formula_event_t
 {
+    /** Start of the calculations of formula cells. */
     calculation_begins,
+    /** End of the calculations of formula cells. */
     calculation_ends,
 };
 
@@ -266,7 +285,88 @@ struct IXION_DLLPUBLIC formula_group_t
  */
 IXION_DLLPUBLIC std::string_view get_formula_error_name(formula_error_t fe);
 
-}
+/**
+ * Parse a formula error string and convert it to a corresponding enum value.
+ *
+ * @param s string representation of a formula error type.
+ * @return enum value for a formula error type.
+ */
+IXION_DLLPUBLIC formula_error_t to_formula_error_type(std::string_view s);
+
+using column_block_handle = void*;
+
+/**
+ * Type of a column block that stores a series of adjacent cell values of the
+ * same type.
+ */
+enum class column_block_t : int
+{
+    unknown = 0,
+    empty,
+    boolean,
+    numeric,
+    string,
+    formula
+};
+
+/**
+ * Data that represents the shape of a column block.
+ */
+struct IXION_DLLPUBLIC column_block_shape_t
+{
+    std::size_t position;
+    std::size_t size;
+    std::size_t offset;
+    column_block_t type;
+    column_block_handle data;
+
+    column_block_shape_t();
+
+    column_block_shape_t(
+        std::size_t _position, std::size_t _size, std::size_t _offset,
+        column_block_t _type, column_block_handle _data);
+
+    column_block_shape_t(const column_block_shape_t& other);
+
+    column_block_shape_t& operator=(const column_block_shape_t& other);
+};
+
+/**
+ * Callback function type to be used during traversal of column data.
+ */
+using column_block_callback_t = std::function<bool(col_t, row_t, row_t, const column_block_shape_t&)>;
+
+IXION_DLLPUBLIC std::ostream& operator<< (std::ostream& os, const column_block_shape_t& v);
+
+/**
+ * Specifies how to determine whether or not to display a sheet name of a cell
+ * or range reference.
+ */
+enum class display_sheet_t
+{
+    /** Sheet name display preference is not specified. */
+    unspecified,
+    /** Sheet name should be always displayed. */
+    always,
+    /** Sheet name should never be displayed. */
+    never,
+    /**
+     * Sheet name should be displayed only when the sheet index of a reference
+     * is different from that of the position of a referencing cell.
+     */
+    only_if_different,
+};
+
+struct IXION_DLLPUBLIC print_config
+{
+    display_sheet_t display_sheet = display_sheet_t::only_if_different;
+
+    print_config();
+    print_config(const print_config& other);
+    ~print_config();
+};
+
+} // namespace ixion
 
 #endif
 

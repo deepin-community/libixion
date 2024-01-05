@@ -1,0 +1,39 @@
+%% Test for ISTEXT and ISNONTEXT functions.
+%% ISNONTEXT is true where ISTEXT is false, and vice versa.
+%mode init
+A1:1
+A2=1
+A3="text"
+A4@text
+B1=ISTEXT(A1)
+B2=ISTEXT(A2)
+B3=ISTEXT(A3)
+B4=ISTEXT(A4)
+B5=ISTEXT(A5)
+B6=ISTEXT(1)
+B7=ISTEXT("inline text")
+C1=ISNONTEXT(A1)
+C2=ISNONTEXT(A2)
+C3=ISNONTEXT(A3)
+C4=ISNONTEXT(A4)
+C5=ISNONTEXT(A5)
+C6=ISNONTEXT(1)
+C7=ISNONTEXT("inline text")
+%calc
+%mode result
+B1=false
+B2=false
+B3=true
+B4=true
+B5=false
+B6=false
+B7=true
+C1=true
+C2=true
+C3=false
+C4=false
+C5=true
+C6=true
+C7=false
+%check
+%exit

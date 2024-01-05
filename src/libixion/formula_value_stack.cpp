@@ -8,12 +8,13 @@
 #include "formula_value_stack.hpp"
 #include "debug.hpp"
 
-#include "ixion/address.hpp"
-#include "ixion/cell.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/formula_result.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/config.hpp"
+#include <ixion/address.hpp>
+#include <ixion/cell.hpp>
+#include <ixion/cell_access.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/formula_result.hpp>
+#include <ixion/config.hpp>
+#include <ixion/exceptions.hpp>
 
 #include <string>
 #include <sstream>
@@ -22,128 +23,113 @@ namespace ixion {
 
 namespace {
 
-double get_numeric_value(const iface::formula_model_access& cxt, const stack_value& v)
+bool get_boolean_value(const model_context& cxt, const stack_value& v)
 {
-    double ret = 0.0;
     switch (v.get_type())
     {
+        case stack_value_t::boolean:
+            return v.get_boolean();
         case stack_value_t::value:
         case stack_value_t::matrix:
-            ret = v.get_value();
-            break;
+            return v.get_value() != 0.0;
         case stack_value_t::single_ref:
         {
             // reference to a single cell.
             const abs_address_t& addr = v.get_address();
-            ret = cxt.get_numeric_value(addr);
+            auto ca = cxt.get_cell_access(addr);
+            switch (ca.get_value_type())
+            {
+                case cell_value_t::numeric:
+                case cell_value_t::boolean:
+                    return ca.get_boolean_value();
+                case cell_value_t::empty:
+                    return false;
+                default:;
+            }
             break;
         }
-        default:
-            IXION_DEBUG("value is being popped, but the stack value type is not appropriate.");
-            throw formula_error(formula_error_t::stack_error);
+        default:;
     }
-    return ret;
+
+    throw formula_error(formula_error_t::invalid_value_type);
 }
 
+double get_numeric_value(const model_context& cxt, const stack_value& v)
+{
+    switch (v.get_type())
+    {
+        case stack_value_t::boolean:
+            return v.get_boolean() ? 1.0 : 0.0;
+        case stack_value_t::value:
+        case stack_value_t::matrix:
+            return v.get_value();
+        case stack_value_t::string:
+            return 0.0;
+        case stack_value_t::single_ref:
+        {
+            // reference to a single cell.
+            const abs_address_t& addr = v.get_address();
+            return cxt.get_numeric_value(addr);
+        }
+        default:;
+    }
+
+    throw formula_error(formula_error_t::invalid_value_type);
 }
+
+} // anonymous namespace
+
+std::ostream& operator<<(std::ostream& os, stack_value_t sv)
+{
+    static constexpr std::string_view names[] = {
+        "boolean",
+        "error",
+        "value",
+        "string",
+        "single_ref",
+        "range_ref",
+        "matrix",
+    };
+
+    auto pos = static_cast<std::size_t>(sv);
+    if (pos < std::size(names))
+        os << names[pos];
+    else
+        os << "???";
+
+    return os;
+}
+
+stack_value::stack_value(bool b) :
+    m_type(stack_value_t::boolean), m_value(b) {}
 
 stack_value::stack_value(double val) :
     m_type(stack_value_t::value), m_value(val) {}
 
 stack_value::stack_value(std::string str) :
-    m_type(stack_value_t::string), m_str(new std::string(std::move(str))) {}
+    m_type(stack_value_t::string), m_value(std::move(str)) {}
 
 stack_value::stack_value(const abs_address_t& val) :
-    m_type(stack_value_t::single_ref), m_address(new abs_address_t(val)) {}
+    m_type(stack_value_t::single_ref), m_value(val) {}
 
 stack_value::stack_value(const abs_range_t& val) :
-    m_type(stack_value_t::range_ref), m_range(new abs_range_t(val)) {}
+    m_type(stack_value_t::range_ref), m_value(val) {}
+
+stack_value::stack_value(formula_error_t err) :
+    m_type(stack_value_t::error), m_value(err) {}
 
 stack_value::stack_value(matrix mtx) :
-    m_type(stack_value_t::matrix), m_matrix(new matrix(std::move(mtx))) {}
+    m_type(stack_value_t::matrix), m_value(std::move(mtx)) {}
 
 stack_value::stack_value(stack_value&& other) :
-    m_type(other.m_type)
-{
-    other.m_type = stack_value_t::value;
+    m_type(other.m_type), m_value(std::move(other.m_value)) {}
 
-    switch (m_type)
-    {
-        case stack_value_t::matrix:
-            m_matrix = other.m_matrix;
-            other.m_matrix = nullptr;
-            break;
-        case stack_value_t::range_ref:
-            m_range = other.m_range;
-            other.m_range = nullptr;
-            break;
-        case stack_value_t::single_ref:
-            m_address = other.m_address;
-            other.m_address = nullptr;
-            break;
-        case stack_value_t::string:
-            m_str = other.m_str;
-            other.m_str = nullptr;
-            break;
-        case stack_value_t::value:
-            m_value = other.m_value;
-            break;
-        default:
-            ;
-    }
-}
-
-stack_value::~stack_value()
-{
-    switch (m_type)
-    {
-        case stack_value_t::range_ref:
-            delete m_range;
-            break;
-        case stack_value_t::single_ref:
-            delete m_address;
-            break;
-        case stack_value_t::matrix:
-            delete m_matrix;
-            break;
-        case stack_value_t::string:
-            delete m_str;
-            break;
-        case stack_value_t::value:
-        default:
-            ; // do nothing
-    }
-}
+stack_value::~stack_value() = default;
 
 stack_value& stack_value::operator= (stack_value&& other)
 {
-    other.m_type = stack_value_t::value;
-
-    switch (m_type)
-    {
-        case stack_value_t::matrix:
-            m_matrix = other.m_matrix;
-            other.m_matrix = nullptr;
-            break;
-        case stack_value_t::range_ref:
-            m_range = other.m_range;
-            other.m_range = nullptr;
-            break;
-        case stack_value_t::single_ref:
-            m_address = other.m_address;
-            other.m_address = nullptr;
-            break;
-        case stack_value_t::string:
-            m_str = other.m_str;
-            other.m_str = nullptr;
-            break;
-        case stack_value_t::value:
-            m_value = other.m_value;
-            break;
-        default:
-            ;
-    }
-
+    m_type = other.m_type;
+    m_value = std::move(other.m_value);
     return *this;
 }
 
@@ -152,14 +138,32 @@ stack_value_t stack_value::get_type() const
     return m_type;
 }
 
+bool stack_value::get_boolean() const
+{
+    switch (m_type)
+    {
+        case stack_value_t::boolean:
+            return std::get<bool>(m_value);
+        case stack_value_t::value:
+            return std::get<double>(m_value) != 0.0;
+        case stack_value_t::matrix:
+            return std::get<matrix>(m_value).get_boolean(0, 0);
+        default:;
+    }
+
+    return false;
+}
+
 double stack_value::get_value() const
 {
     switch (m_type)
     {
+        case stack_value_t::boolean:
+            return std::get<bool>(m_value) ? 1.0 : 0.0;
         case stack_value_t::value:
-            return m_value;
+            return std::get<double>(m_value);
         case stack_value_t::matrix:
-            return m_matrix->get_numeric(0, 0);
+            return std::get<matrix>(m_value).get_numeric(0, 0);
         default:
             ;
     }
@@ -169,33 +173,49 @@ double stack_value::get_value() const
 
 const std::string& stack_value::get_string() const
 {
-    return *m_str;
+    return std::get<std::string>(m_value);
 }
 
 const abs_address_t& stack_value::get_address() const
 {
-    return *m_address;
+    return std::get<abs_address_t>(m_value);
 }
 
 const abs_range_t& stack_value::get_range() const
 {
-    return *m_range;
+    return std::get<abs_range_t>(m_value);
+}
+
+formula_error_t stack_value::get_error() const
+{
+    return std::get<formula_error_t>(m_value);
+}
+
+const matrix& stack_value::get_matrix() const
+{
+    return std::get<matrix>(m_value);
 }
 
 matrix stack_value::pop_matrix()
 {
     switch (m_type)
     {
+        case stack_value_t::boolean:
+        {
+            matrix mtx(1, 1);
+            mtx.set(0, 0, std::get<bool>(m_value));
+            return mtx;
+        }
         case stack_value_t::value:
         {
             matrix mtx(1, 1);
-            mtx.set(0, 0, m_value);
+            mtx.set(0, 0, std::get<double>(m_value));
             return mtx;
         }
         case stack_value_t::matrix:
         {
             matrix mtx;
-            mtx.swap(*m_matrix);
+            mtx.swap(std::get<matrix>(m_value));
             return mtx;
         }
         default:
@@ -203,7 +223,7 @@ matrix stack_value::pop_matrix()
     }
 }
 
-formula_value_stack::formula_value_stack(const iface::formula_model_access& cxt) : m_context(cxt) {}
+formula_value_stack::formula_value_stack(const model_context& cxt) : m_context(cxt) {}
 
 formula_value_stack::iterator formula_value_stack::begin()
 {
@@ -287,6 +307,12 @@ void formula_value_stack::push_back(value_type&& val)
     m_stack.push_back(std::move(val));
 }
 
+void formula_value_stack::push_boolean(bool b)
+{
+    IXION_TRACE("b=" << std::boolalpha << b);
+    m_stack.emplace_back(b);
+}
+
 void formula_value_stack::push_value(double val)
 {
     IXION_TRACE("val=" << val);
@@ -318,6 +344,24 @@ void formula_value_stack::push_matrix(matrix mtx)
     m_stack.emplace_back(std::move(mtx));
 }
 
+void formula_value_stack::push_error(formula_error_t err)
+{
+    IXION_TRACE("err=" << short(err) << " (" << get_formula_error_name(err) << ")");
+    m_stack.emplace_back(err);
+}
+
+bool formula_value_stack::pop_boolean()
+{
+    if (m_stack.empty())
+        throw formula_error(formula_error_t::stack_error);
+
+    const stack_value& v = m_stack.back();
+    bool ret = get_boolean_value(m_context, v);
+    m_stack.pop_back();
+    IXION_TRACE("ret=" << std::boolalpha << ret);
+    return ret;
+}
+
 double formula_value_stack::pop_value()
 {
     double ret = 0.0;
@@ -331,7 +375,7 @@ double formula_value_stack::pop_value()
     return ret;
 }
 
-const std::string formula_value_stack::pop_string()
+std::string formula_value_stack::pop_string()
 {
     IXION_TRACE("pop_string");
 
@@ -347,7 +391,13 @@ const std::string formula_value_stack::pop_string()
             m_stack.pop_back();
             return str;
         }
-        break;
+        case stack_value_t::boolean:
+        {
+            std::ostringstream os;
+            os << std::boolalpha << v.get_boolean();
+            m_stack.pop_back();
+            return os.str();
+        }
         case stack_value_t::value:
         {
             std::ostringstream os;
@@ -355,7 +405,6 @@ const std::string formula_value_stack::pop_string()
             m_stack.pop_back();
             return os.str();
         }
-        break;
         case stack_value_t::single_ref:
         {
             // reference to a single cell.
@@ -376,6 +425,12 @@ const std::string formula_value_stack::pop_string()
                             throw formula_error(res.get_error());
                         case formula_result::result_type::string:
                             return res.get_string();
+                        case formula_result::result_type::boolean:
+                        {
+                            std::ostringstream os;
+                            os << std::boolalpha << res.get_boolean();
+                            return os.str();
+                        }
                         case formula_result::result_type::value:
                         {
                             std::ostringstream os;
@@ -404,27 +459,74 @@ const std::string formula_value_stack::pop_string()
                 default:
                     throw formula_error(formula_error_t::stack_error);
             }
+
+            break;
         }
-        break;
         default:
-            ;
+        {
+            IXION_DEBUG("unhandled type: " << v.get_type());
+        }
     }
     throw formula_error(formula_error_t::stack_error);
+}
+
+matrix formula_value_stack::pop_matrix()
+{
+    if (auto mtx = maybe_pop_matrix(); mtx)
+        return *mtx;
+
+    throw formula_error(formula_error_t::stack_error);
+}
+
+std::optional<matrix> formula_value_stack::maybe_pop_matrix()
+{
+    if (m_stack.empty())
+        throw formula_error(formula_error_t::stack_error);
+
+    stack_value& v = m_stack.back();
+    switch (v.get_type())
+    {
+        case stack_value_t::matrix:
+        {
+            auto mtx = v.pop_matrix();
+            m_stack.pop_back();
+            return mtx;
+        }
+        case stack_value_t::range_ref:
+            return pop_range_value();
+        default:;
+    }
+
+    return {};
 }
 
 abs_address_t formula_value_stack::pop_single_ref()
 {
     IXION_TRACE("pop_single_ref");
+
     if (m_stack.empty())
         throw formula_error(formula_error_t::stack_error);
 
     const stack_value& v = m_stack.back();
-    if (v.get_type() != stack_value_t::single_ref)
-        throw formula_error(formula_error_t::stack_error);
 
-    abs_address_t addr = v.get_address();
-    m_stack.pop_back();
-    return addr;
+    switch (v.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = v.get_address();
+            m_stack.pop_back();
+            return addr;
+        }
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = v.get_range();
+            m_stack.pop_back();
+            return range.first;
+        }
+        default:;
+    }
+
+    throw formula_error(formula_error_t::stack_error);
 }
 
 abs_range_t formula_value_stack::pop_range_ref()
@@ -435,12 +537,24 @@ abs_range_t formula_value_stack::pop_range_ref()
         throw formula_error(formula_error_t::stack_error);
 
     const stack_value& v = m_stack.back();
-    if (v.get_type() != stack_value_t::range_ref)
-        throw formula_error(formula_error_t::stack_error);
 
-    abs_range_t range = v.get_range();
-    m_stack.pop_back();
-    return range;
+    switch (v.get_type())
+    {
+        case stack_value_t::single_ref:
+        {
+            abs_address_t addr = v.get_address();
+            m_stack.pop_back();
+            return addr;
+        }
+        case stack_value_t::range_ref:
+        {
+            abs_range_t range = v.get_range();
+            m_stack.pop_back();
+            return range;
+        }
+        default:
+            throw formula_error(formula_error_t::stack_error);
+    }
 }
 
 matrix formula_value_stack::pop_range_value()
@@ -457,6 +571,45 @@ matrix formula_value_stack::pop_range_value()
     matrix ret = m_context.get_range_value(v.get_range());
     m_stack.pop_back();
     return ret;
+}
+
+formula_error_t formula_value_stack::pop_error()
+{
+    IXION_TRACE("pop_error");
+
+    if (m_stack.empty())
+        throw formula_error(formula_error_t::stack_error);
+
+    const stack_value& v = m_stack.back();
+    if (v.get_type() != stack_value_t::error)
+        throw formula_error(formula_error_t::stack_error);
+
+    formula_error_t ret = v.get_error();
+    m_stack.pop_back();
+    return ret;
+}
+
+resolved_stack_value formula_value_stack::pop_matrix_or_numeric()
+{
+    if (auto mtx = maybe_pop_matrix(); mtx)
+        return *mtx;
+
+    // fall back to numeric value
+    return pop_value();
+}
+
+resolved_stack_value formula_value_stack::pop_matrix_or_string()
+{
+    if (auto mtx = maybe_pop_matrix(); mtx)
+        return *mtx;
+
+    // fall back to string value
+    return pop_string();
+}
+
+void formula_value_stack::pop_back()
+{
+    m_stack.pop_back();
 }
 
 stack_value_t formula_value_stack::get_type() const

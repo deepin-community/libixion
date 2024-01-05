@@ -9,14 +9,16 @@
 #define INCLUDED_IXION_FORMULA_HPP
 
 #include "formula_tokens.hpp"
-#include "./interface/formula_model_access.hpp"
+#include "types.hpp"
 #include "env.hpp"
 
 #include <string>
 
 namespace ixion {
 
+class formula_cell;
 class formula_name_resolver;
+class model_context;
 
 /**
  * Parse a raw formula expression string into formula tokens.
@@ -29,23 +31,28 @@ class formula_name_resolver;
  * @return formula tokens representing the parsed formula expression.
  */
 IXION_DLLPUBLIC formula_tokens_t parse_formula_string(
-    iface::formula_model_access& cxt, const abs_address_t& pos,
+    model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, std::string_view formula);
 
 /**
  * Create a set of tokens that represent an invalid formula.
+ *
+ * This can be used for a cell containing an invalid formula expression, and
+ * the error information needs to be preserved.
  *
  * @param cxt model context.
  * @param src_formula original formula string.
  * @param error error string.
  *
  * @return a set of tokens, the first of which is a token of type fop_error,
- *         followed by two string tokens.  The first string token stores
- *         original formula string, whereas the second one stores the error
- *         string.
+ *         followed by two string tokens.  The second token stores the
+ *         original formula string, whereas the third one stores the error
+ *         string.  The first token stores the number of tokens that follows
+ *         as its value of type std::size_t, which is always 2 in the current
+ *         implementation.
  */
 IXION_DLLPUBLIC formula_tokens_t create_formula_error_tokens(
-    iface::formula_model_access& cxt, std::string_view src_formula,
+    model_context& cxt, std::string_view src_formula,
     std::string_view error);
 
 /**
@@ -59,7 +66,22 @@ IXION_DLLPUBLIC formula_tokens_t create_formula_error_tokens(
  * @return string representation of the formula tokens.
  */
 IXION_DLLPUBLIC std::string print_formula_tokens(
-    const iface::formula_model_access& cxt, const abs_address_t& pos,
+    const model_context& cxt, const abs_address_t& pos,
+    const formula_name_resolver& resolver, const formula_tokens_t& tokens);
+
+/**
+ * Convert formula tokens into a human-readable string representation.
+ *
+ * @param config Configuration options for printing preferences.
+ * @param cxt Model context.
+ * @param pos Address of the cell that has the formula tokens.
+ * @param resolver Name resolver object used to print name tokens.
+ * @param tokens Formula tokens to print.
+ *
+ * @return string representation of the formula tokens.
+ */
+IXION_DLLPUBLIC std::string print_formula_tokens(
+    const print_config& config, const model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, const formula_tokens_t& tokens);
 
 /**
@@ -74,7 +96,23 @@ IXION_DLLPUBLIC std::string print_formula_tokens(
  * @return string representation of the formula token.
  */
 IXION_DLLPUBLIC std::string print_formula_token(
-    const iface::formula_model_access& cxt, const abs_address_t& pos,
+    const model_context& cxt, const abs_address_t& pos,
+    const formula_name_resolver& resolver, const formula_token& token);
+
+/**
+ * Convert an individual formula token into a human-readable string
+ * representation.
+ *
+ * @param config Configuration options for printing preferences.
+ * @param cxt Model context.
+ * @param pos Address of the cell that has the formula tokens.
+ * @param resolver Name resolver object used to print name tokens.
+ * @param token Formula token to convert.
+ *
+ * @return string representation of the formula token.
+ */
+IXION_DLLPUBLIC std::string print_formula_token(
+    const print_config& config, const model_context& cxt, const abs_address_t& pos,
     const formula_name_resolver& resolver, const formula_token& token);
 
 /**
@@ -90,7 +128,7 @@ IXION_DLLPUBLIC std::string print_formula_token(
  *             passing a pointer will save the overhead of fetching.
  */
 void IXION_DLLPUBLIC register_formula_cell(
-    iface::formula_model_access& cxt, const abs_address_t& pos, const formula_cell* cell = nullptr);
+    model_context& cxt, const abs_address_t& pos, const formula_cell* cell = nullptr);
 
 /**
  * Unregister a formula cell with cell dependency tracker if a formula cell
@@ -102,7 +140,7 @@ void IXION_DLLPUBLIC register_formula_cell(
  * @param pos address of the cell being unregistered.
  */
 void IXION_DLLPUBLIC unregister_formula_cell(
-    iface::formula_model_access& cxt, const abs_address_t& pos);
+    model_context& cxt, const abs_address_t& pos);
 
 /**
  * Get the positions of those formula cells that directly or indirectly
@@ -116,7 +154,7 @@ void IXION_DLLPUBLIC unregister_formula_cell(
  *         indirectly depend on at least one of the specified source cells.
  */
 IXION_DLLPUBLIC abs_address_set_t query_dirty_cells(
-    iface::formula_model_access& cxt, const abs_address_set_t& modified_cells);
+    model_context& cxt, const abs_address_set_t& modified_cells);
 
 /**
  * Get a sequence of the positions of all formula cells that track at least
@@ -150,7 +188,7 @@ IXION_DLLPUBLIC abs_address_set_t query_dirty_cells(
  *         formula cells that are already known to be dirty.
  */
 IXION_DLLPUBLIC std::vector<abs_range_t> query_and_sort_dirty_cells(
-    iface::formula_model_access& cxt, const abs_range_set_t& modified_cells,
+    model_context& cxt, const abs_range_set_t& modified_cells,
     const abs_range_set_t* dirty_formula_cells = nullptr);
 
 /**
@@ -170,7 +208,7 @@ IXION_DLLPUBLIC std::vector<abs_range_t> query_and_sort_dirty_cells(
  *                     manage the calculation threads.
  */
 void IXION_DLLPUBLIC calculate_sorted_cells(
-    iface::formula_model_access& cxt, const std::vector<abs_range_t>& formula_cells, size_t thread_count);
+    model_context& cxt, const std::vector<abs_range_t>& formula_cells, size_t thread_count);
 
 } // namespace ixion
 

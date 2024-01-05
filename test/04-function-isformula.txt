@@ -1,0 +1,20 @@
+%% Test for ISFORMULA function.
+%mode init
+A1:1
+A2@string
+A3="string"
+A4=1/2
+B1=ISFORMULA(A1)
+B2=ISFORMULA(A2)
+B3=ISFORMULA(A3)
+B4=ISFORMULA(A4)
+B5=ISFORMULA(A5)
+%calc
+%mode result
+B1=false
+B2=false
+B3=true
+B4=true
+B5=false
+%check
+%exit

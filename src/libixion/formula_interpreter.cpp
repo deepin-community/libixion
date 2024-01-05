@@ -7,25 +7,23 @@
 
 #include "formula_interpreter.hpp"
 #include "formula_functions.hpp"
-#include "concrete_formula_tokens.hpp"
 #include "debug.hpp"
 
-#include "ixion/cell.hpp"
-#include "ixion/global.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/formula.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/interface/session_handler.hpp"
-#include "ixion/interface/table_handler.hpp"
-#include "ixion/config.hpp"
+#include <ixion/cell.hpp>
+#include <ixion/global.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/formula.hpp>
+#include <ixion/interface/session_handler.hpp>
+#include <ixion/interface/table_handler.hpp>
+#include <ixion/config.hpp>
+#include <ixion/cell_access.hpp>
 
 #include <cassert>
 #include <string>
 #include <iostream>
 #include <sstream>
 #include <cmath>
-
-using namespace std;
+#include <optional>
 
 namespace ixion {
 
@@ -34,15 +32,15 @@ namespace {
 class invalid_expression : public general_error
 {
 public:
-    invalid_expression(const string& msg) : general_error(msg) {}
+    invalid_expression(const std::string& msg) : general_error(msg) {}
 };
 
-opcode_token paren_open = opcode_token(fop_open);
-opcode_token paren_close = opcode_token(fop_close);
+const formula_token paren_open = formula_token{fop_open};
+const formula_token paren_close = formula_token{fop_close};
 
 }
 
-formula_interpreter::formula_interpreter(const formula_cell* cell, iface::formula_model_access& cxt) :
+formula_interpreter::formula_interpreter(const formula_cell* cell, model_context& cxt) :
     m_parent_cell(cell),
     m_context(cxt),
     m_error(formula_error_t::no_error)
@@ -98,6 +96,8 @@ bool formula_interpreter::interpret()
     }
     catch (const invalid_expression& e)
     {
+        IXION_DEBUG("invalid expression: " << e.what());
+
         if (mp_handler)
             mp_handler->set_invalid_expression(e.what());
 
@@ -140,22 +140,21 @@ void formula_interpreter::init_tokens()
     if (!ts)
         return;
 
-    const formula_tokens_t& src_tokens = ts->get();
-
-    for (const std::unique_ptr<formula_token>& p : src_tokens)
+    for (const formula_token& t : ts->get())
     {
-        if (p->get_opcode() == fop_named_expression)
+        if (t.opcode == fop_named_expression)
         {
             // Named expression.  Expand it.
+            const auto& name = std::get<std::string>(t.value);
             const named_expression_t* expr = m_context.get_named_expression(
-                m_pos.sheet, p->get_name());
+                m_pos.sheet, name);
 
-            used_names.insert(p->get_name());
+            used_names.insert(name);
             expand_named_expression(expr, used_names);
         }
         else
             // Normal token.
-            m_tokens.push_back(p.get());
+            m_tokens.push_back(&t);
     }
 
     m_end_token_pos = m_tokens.end();
@@ -163,7 +162,7 @@ void formula_interpreter::init_tokens()
 
 namespace {
 
-void get_result_from_cell(const iface::formula_model_access& cxt, const abs_address_t& addr, formula_result& res)
+void get_result_from_cell(const model_context& cxt, const abs_address_t& addr, formula_result& res)
 {
     switch (cxt.get_celltype(addr))
     {
@@ -173,9 +172,8 @@ void get_result_from_cell(const iface::formula_model_access& cxt, const abs_addr
             break;
         }
         case celltype_t::boolean:
-            // TODO : treat this as a numeric value for now.  Later we need to
-            // decide whether we need to treat this as a distinct boolean
-            // type.
+            res.set_boolean(cxt.get_boolean_value(addr));
+            break;
         case celltype_t::numeric:
             res.set_value(cxt.get_numeric_value(addr));
             break;
@@ -216,6 +214,11 @@ void formula_interpreter::pop_result()
             m_result.set_string_value(res.get_string());
             break;
         }
+        case stack_value_t::boolean:
+        {
+            m_result.set_boolean(res.get_boolean());
+            break;
+        }
         case stack_value_t::value:
             IXION_TRACE("value=" << res.get_value());
             m_result.set_value(res.get_value());
@@ -223,8 +226,9 @@ void formula_interpreter::pop_result()
         case stack_value_t::matrix:
             m_result.set_matrix(res.pop_matrix());
             break;
-        default:
-            ;
+        case stack_value_t::error:
+            m_result.set_error(res.get_error());
+            break;
     }
 
     if (mp_handler)
@@ -237,12 +241,11 @@ void formula_interpreter::expand_named_expression(const named_expression_t* expr
         throw formula_error(formula_error_t::name_not_found);
 
     m_tokens.push_back(&paren_open);
-    for (const auto& token : expr->tokens)
+    for (const auto& t : expr->tokens)
     {
-        const formula_token& t = *token;
-        if (t.get_opcode() == fop_named_expression)
+        if (t.opcode == fop_named_expression)
         {
-            string expr_name = t.get_name();
+            const auto& expr_name = std::get<std::string>(t.value);
             if (used_names.count(expr_name) > 0)
             {
                 // Circular reference detected.
@@ -295,6 +298,21 @@ const formula_token& formula_interpreter::next_token()
     return token();
 }
 
+const std::string& formula_interpreter::string_or_throw() const
+{
+    assert(token().opcode == fop_string);
+
+    const string_id_t sid = std::get<string_id_t>(token().value);
+    const std::string* p = m_context.get_string(sid);
+    if (!p)
+        throw general_error("no string found for the specified string ID.");
+
+    if (mp_handler)
+        mp_handler->push_string(sid);
+
+    return *p;
+}
+
 namespace {
 
 bool valid_expression_op(fopcode_t oc)
@@ -316,30 +334,38 @@ bool valid_expression_op(fopcode_t oc)
     return false;
 }
 
-bool pop_stack_value_or_string(const iface::formula_model_access& cxt,
-    formula_value_stack& stack, stack_value_t& vt, double& val, string& str)
+/**
+ * Pop the value off of the stack but only as one of the following type:
+ *
+ * <ul>
+ * <li>value</li>
+ * <li>string</li>
+ * <li>matrix</li>
+ * </ul>
+ */
+std::optional<stack_value> pop_stack_value(const model_context& cxt, formula_value_stack& stack)
 {
-    vt = stack.get_type();
-    switch (vt)
+    switch (stack.get_type())
     {
+        case stack_value_t::boolean:
+            return stack_value{stack.pop_boolean() ? 1.0 : 0.0};
         case stack_value_t::value:
-            val = stack.pop_value();
-            break;
+            return stack_value{stack.pop_value()};
         case stack_value_t::string:
-            str = stack.pop_string();
-            break;
+            return stack_value{stack.pop_string()};
+        case stack_value_t::matrix:
+            return stack_value{stack.pop_matrix()};
         case stack_value_t::single_ref:
         {
             const abs_address_t& addr = stack.pop_single_ref();
+            auto ca = cxt.get_cell_access(addr);
 
-            switch (cxt.get_celltype(addr))
+            switch (ca.get_type())
             {
                 case celltype_t::empty:
                 {
                     // empty cell has a value of 0.
-                    vt = stack_value_t::value;
-                    val = 0.0;
-                    return true;
+                    return stack_value{0.0};
                 }
                 case celltype_t::boolean:
                     // TODO : Decide whether we need to treat this as a
@@ -347,53 +373,48 @@ bool pop_stack_value_or_string(const iface::formula_model_access& cxt,
                     // numeric value equivalent.
                 case celltype_t::numeric:
                 {
-                    vt = stack_value_t::value;
-                    val = cxt.get_numeric_value(addr);
-                    return true;
+                    double val = ca.get_numeric_value();
+                    return stack_value{val};
                 }
                 case celltype_t::string:
                 {
-                    vt = stack_value_t::string;
-                    size_t strid = cxt.get_string_identifier(addr);
-                    const string* ps = cxt.get_string(strid);
+                    std::size_t strid = ca.get_string_identifier();
+                    const std::string* ps = cxt.get_string(strid);
                     if (!ps)
-                        return false;
-                    str = *ps;
-                    return true;
+                    {
+                        IXION_DEBUG("fail to get a string value for the id of " << strid);
+                        return {};
+                    }
+
+                    return stack_value{*ps};
                 }
                 case celltype_t::formula:
                 {
-                    formula_result res = cxt.get_formula_result(addr);
+                    formula_result res = ca.get_formula_result();
 
                     switch (res.get_type())
                     {
+                        case formula_result::result_type::boolean:
+                            return stack_value{res.get_boolean() ? 1.0 : 0.0};
                         case formula_result::result_type::value:
-                        {
-                            vt = stack_value_t::value;
-                            val = res.get_value();
-                            return true;
-                        }
+                            return stack_value{res.get_value()};
                         case formula_result::result_type::string:
-                        {
-                            vt = stack_value_t::string;
-                            str = res.get_string();
-                            return true;
-                        }
+                            return stack_value{res.get_string()};
                         case formula_result::result_type::error:
                         default:
-                            return false;
+                            return {};
                     }
                 }
                 default:
-                    return false;
+                    return {};
             }
             break;
         }
         case stack_value_t::range_ref:
-        default:
-            return false;
+        default:;
     }
-    return true;
+
+    return {};
 }
 
 void compare_values(formula_value_stack& vs, fopcode_t oc, double val1, double val2)
@@ -519,7 +540,565 @@ void compare_string_to_value(
     }
 }
 
+template<typename Op>
+matrix operate_all_elements(const matrix& mtx, double val)
+{
+    matrix res = mtx;
+
+    for (std::size_t col = 0; col < mtx.col_size(); ++col)
+    {
+        for (std::size_t row = 0; row < mtx.row_size(); ++row)
+        {
+            auto elem = mtx.get(row, col);
+
+            switch (elem.type)
+            {
+                case matrix::element_type::numeric:
+                {
+                    auto v = Op{}(std::get<double>(elem.value), val);
+                    if (v)
+                        res.set(row, col, *v);
+                    else
+                        res.set(row, col, v.error());
+                    break;
+                }
+                case matrix::element_type::string:
+                    break;
+                case matrix::element_type::boolean:
+                {
+                    auto v = Op{}(std::get<bool>(elem.value), val);
+                    if (v)
+                        res.set(row, col, *v);
+                    else
+                        res.set(row, col, v.error());
+                    break;
+                }
+                case matrix::element_type::error:
+                    res.set(row, col, std::get<formula_error_t>(elem.value));
+                    break;
+                case matrix::element_type::empty:
+                    break;
+            }
+        }
+    }
+
+    return res;
 }
+
+matrix operate_all_elements(const matrix& mtx, std::string_view val)
+{
+    matrix res = mtx;
+
+    for (std::size_t col = 0; col < mtx.col_size(); ++col)
+    {
+        for (std::size_t row = 0; row < mtx.row_size(); ++row)
+        {
+            auto elem = mtx.get(row, col);
+
+            switch (elem.type)
+            {
+                case matrix::element_type::numeric:
+                {
+                    std::ostringstream os;
+                    os << std::get<double>(elem.value) << val;
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::string:
+                {
+                    std::ostringstream os;
+                    os << std::get<std::string_view>(elem.value) << val;
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::boolean:
+                {
+                    std::ostringstream os;
+                    os << std::boolalpha << std::get<bool>(elem.value) << val;
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::error:
+                    res.set(row, col, std::get<formula_error_t>(elem.value));
+                    break;
+                case matrix::element_type::empty:
+                    break;
+            }
+        }
+    }
+
+    return res;
+}
+
+matrix operate_all_elements(std::string_view val, const matrix& mtx)
+{
+    matrix res = mtx;
+
+    for (std::size_t col = 0; col < mtx.col_size(); ++col)
+    {
+        for (std::size_t row = 0; row < mtx.row_size(); ++row)
+        {
+            auto elem = mtx.get(row, col);
+
+            switch (elem.type)
+            {
+                case matrix::element_type::numeric:
+                {
+                    std::ostringstream os;
+                    os << val << std::get<double>(elem.value);
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::string:
+                {
+                    std::ostringstream os;
+                    os << val << std::get<std::string_view>(elem.value);
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::boolean:
+                {
+                    std::ostringstream os;
+                    os << val << std::boolalpha << std::get<bool>(elem.value);
+                    res.set(row, col, os.str());
+                    break;
+                }
+                case matrix::element_type::error:
+                    res.set(row, col, std::get<formula_error_t>(elem.value));
+                    break;
+                case matrix::element_type::empty:
+                    break;
+            }
+        }
+    }
+
+    return res;
+}
+
+template<typename Op>
+matrix operate_all_elements(double val, const matrix& mtx)
+{
+    matrix res = mtx;
+
+    for (std::size_t col = 0; col < mtx.col_size(); ++col)
+    {
+        for (std::size_t row = 0; row < mtx.row_size(); ++row)
+        {
+            auto elem = mtx.get(row, col);
+
+            switch (elem.type)
+            {
+                case matrix::element_type::numeric:
+                {
+                    auto v = Op{}(val, std::get<double>(elem.value));
+                    if (v)
+                        res.set(row, col, *v);
+                    else
+                        res.set(row, col, v.error());
+                    break;
+                }
+                case matrix::element_type::string:
+                    break;
+                case matrix::element_type::boolean:
+                {
+                    auto v = Op{}(val, std::get<bool>(elem.value));
+                    if (v)
+                        res.set(row, col, *v);
+                    else
+                        res.set(row, col, v.error());
+                    break;
+                }
+                case matrix::element_type::error:
+                    res.set(row, col, std::get<formula_error_t>(elem.value));
+                    break;
+                case matrix::element_type::empty:
+                    break;
+            }
+        }
+    }
+
+    return res;
+}
+
+struct add_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        return v1 + v2;
+    }
+};
+
+struct sub_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        return v1 - v2;
+    }
+};
+
+struct equal_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        return v1 == v2;
+    }
+};
+
+struct not_equal_op
+{
+    formula_op_result<bool> operator()(double v1, double v2) const
+    {
+        return v1 != v2;
+    }
+};
+
+struct less_op
+{
+    formula_op_result<bool> operator()(double v1, double v2) const
+    {
+        return v1 < v2;
+    }
+};
+
+struct less_equal_op
+{
+    formula_op_result<bool> operator()(double v1, double v2) const
+    {
+        return v1 <= v2;
+    }
+};
+
+struct greater_op
+{
+    formula_op_result<bool> operator()(double v1, double v2) const
+    {
+        return v1 > v2;
+    }
+};
+
+struct greater_equal_op
+{
+    formula_op_result<bool> operator()(double v1, double v2) const
+    {
+        return v1 >= v2;
+    }
+};
+
+struct multiply_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        return v1 * v2;
+    }
+};
+
+struct divide_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        if (v2 == 0.0)
+            return formula_error_t::division_by_zero;
+
+        return v1 / v2;
+    }
+};
+
+struct exponent_op
+{
+    formula_op_result<double> operator()(double v1, double v2) const
+    {
+        return std::pow(v1, v2);
+    }
+};
+
+void compare_matrix_to_value(formula_value_stack& vs, fopcode_t oc, const matrix& mtx, double val)
+{
+    switch (oc)
+    {
+        case fop_minus:
+            val = -val;
+            // fallthrough
+        case fop_plus:
+        {
+            matrix res = operate_all_elements<add_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_equal:
+        {
+            matrix res = operate_all_elements<equal_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_not_equal:
+        {
+            matrix res = operate_all_elements<not_equal_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_less:
+        {
+            matrix res = operate_all_elements<less_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_less_equal:
+        {
+            matrix res = operate_all_elements<less_equal_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_greater:
+        {
+            matrix res = operate_all_elements<greater_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_greater_equal:
+        {
+            matrix res = operate_all_elements<greater_equal_op>(mtx, val);
+            vs.push_matrix(res);
+            break;
+        }
+        default:
+            throw invalid_expression("unknown expression operator.");
+    }
+}
+
+void compare_value_to_matrix(formula_value_stack& vs, fopcode_t oc, double val, const matrix& mtx)
+{
+    switch (oc)
+    {
+        case fop_minus:
+        {
+            matrix res = operate_all_elements<sub_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_plus:
+        {
+            matrix res = operate_all_elements<add_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_equal:
+        {
+            matrix res = operate_all_elements<equal_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_not_equal:
+        {
+            matrix res = operate_all_elements<not_equal_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_less:
+        {
+            matrix res = operate_all_elements<less_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_less_equal:
+        {
+            matrix res = operate_all_elements<less_equal_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_greater:
+        {
+            matrix res = operate_all_elements<greater_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        case fop_greater_equal:
+        {
+            matrix res = operate_all_elements<greater_equal_op>(val, mtx);
+            vs.push_matrix(res);
+            break;
+        }
+        default:
+            throw invalid_expression("unknown expression operator.");
+    }
+}
+
+std::optional<double> elem_to_numeric(const matrix::element& e)
+{
+    switch (e.type)
+    {
+        case matrix::element_type::numeric:
+            return std::get<double>(e.value);
+        case matrix::element_type::boolean:
+            return std::get<bool>(e.value) ? 1.0 : 0.0;
+        case matrix::element_type::empty:
+            return 0.0;
+        default:;
+    }
+
+    return {};
+};
+
+template<typename Op>
+resolved_stack_value op_matrix_or_numeric(const resolved_stack_value& lhs, const resolved_stack_value& rhs)
+{
+    switch (lhs.type())
+    {
+        case resolved_stack_value::value_type::matrix:
+        {
+            switch (rhs.type())
+            {
+                case resolved_stack_value::value_type::matrix: // matrix * matrix
+                {
+                    const matrix& m1 = lhs.get_matrix();
+                    const matrix& m2 = rhs.get_matrix();
+
+                    if (m1.row_size() != m2.row_size() || m1.col_size() != m2.col_size())
+                        throw invalid_expression("matrix size mis-match");
+
+                    matrix res = m1; // copy
+
+                    for (std::size_t col = 0; col < res.col_size(); ++col)
+                    {
+                        for (std::size_t row = 0; row < res.row_size(); ++row)
+                        {
+                            auto elem1 = res.get(row, col);
+                            auto elem2 = m2.get(row, col);
+
+                            std::optional<double> v1 = elem_to_numeric(elem1);
+                            std::optional<double> v2 = elem_to_numeric(elem2);
+
+                            if (v1 && v2)
+                            {
+                                auto v = Op{}(*v1, *v2);
+                                if (v)
+                                    res.set(row, col, *v);
+                                else
+                                    res.set(row, col, v.error());
+                            }
+                            else
+                                res.set(row, col, formula_error_t::invalid_value_type);
+                        }
+                    }
+                    return res;
+                }
+                case resolved_stack_value::value_type::numeric: // matrix * value
+                    return operate_all_elements<Op>(lhs.get_matrix(), rhs.get_numeric());
+                case resolved_stack_value::value_type::string:
+                    throw invalid_expression("unexpected string value");
+            }
+            break;
+        }
+        case resolved_stack_value::value_type::numeric:
+        {
+            switch (rhs.type())
+            {
+                case resolved_stack_value::value_type::matrix: // value * matrix
+                    return operate_all_elements<Op>(lhs.get_numeric(), rhs.get_matrix());
+                case resolved_stack_value::value_type::numeric: // value * value
+                {
+                    auto v = Op{}(lhs.get_numeric(), rhs.get_numeric());
+                    if (!v)
+                        throw formula_error(v.error());
+
+                    return *v;
+                }
+                case resolved_stack_value::value_type::string:
+                    throw invalid_expression("unexpected string value");
+            }
+            break;
+        }
+        case resolved_stack_value::value_type::string:
+            throw invalid_expression("unexpected string value");
+    }
+
+    std::ostringstream os;
+    os << "unhandled variant type: lhs=" << int(lhs.type()) << "; rhs=" << int(rhs.type());
+    throw invalid_expression(os.str());
+}
+
+std::ostream& operator<<(std::ostream& os, const matrix::element& e)
+{
+    switch (e.type)
+    {
+        case matrix::element_type::numeric:
+            os << std::get<double>(e.value);
+            break;
+        case matrix::element_type::string:
+            os << std::get<std::string_view>(e.value);
+            break;
+        case matrix::element_type::boolean:
+            os << std::boolalpha << std::get<bool>(e.value);
+            break;
+        case matrix::element_type::error:
+        case matrix::element_type::empty:
+            break;
+    }
+    return os;
+}
+
+resolved_stack_value concat_matrix_or_string(const resolved_stack_value& lhs, const resolved_stack_value& rhs)
+{
+    switch (lhs.type())
+    {
+        case resolved_stack_value::value_type::matrix:
+        {
+            switch (rhs.type())
+            {
+                case resolved_stack_value::value_type::matrix: // matrix & matrix
+                {
+                    const matrix& m1 = lhs.get_matrix();
+                    const matrix& m2 = rhs.get_matrix();
+
+                    if (m1.row_size() != m2.row_size() || m1.col_size() != m2.col_size())
+                        throw invalid_expression("matrix size mis-match");
+
+                    matrix res = m1; // copy
+
+                    for (std::size_t col = 0; col < res.col_size(); ++col)
+                    {
+                        for (std::size_t row = 0; row < res.row_size(); ++row)
+                        {
+                            auto elem1 = res.get(row, col);
+                            auto elem2 = m2.get(row, col);
+
+                            std::ostringstream os;
+                            os << elem1 << elem2;
+
+                            res.set(row, col, os.str());
+                        }
+                    }
+                    return res;
+                }
+                case resolved_stack_value::value_type::string: // matrix & string
+                    return operate_all_elements(lhs.get_matrix(), rhs.get_string());
+                case resolved_stack_value::value_type::numeric: // matrix & string
+                    throw invalid_expression("unexpected numeric value");
+            }
+            break;
+        }
+        case resolved_stack_value::value_type::string:
+        {
+            switch (rhs.type())
+            {
+                case resolved_stack_value::value_type::matrix: // string & matrix
+                    return operate_all_elements(lhs.get_string(), rhs.get_matrix());
+                case resolved_stack_value::value_type::string: // string & string
+                    return lhs.get_string() + rhs.get_string();
+                case resolved_stack_value::value_type::numeric:
+                    throw invalid_expression("unexpected numeric value");
+            }
+            break;
+        }
+        case resolved_stack_value::value_type::numeric:
+            throw invalid_expression("unexpected numeric value");
+    }
+
+    std::ostringstream os;
+    os << "unhandled variant type: lhs=" << int(lhs.type()) << "; rhs=" << int(rhs.type());
+    throw invalid_expression(os.str());
+}
+
+} // anonymous namespace
 
 void formula_interpreter::expression()
 {
@@ -529,18 +1108,16 @@ void formula_interpreter::expression()
     term();
     while (has_token())
     {
-        fopcode_t oc = token().get_opcode();
+        fopcode_t oc = token().opcode;
         if (!valid_expression_op(oc))
             return;
 
-        double val1 = 0.0, val2 = 0.0;
-        string str1, str2;
-        bool is_val1 = true, is_val2 = true;
-
-        stack_value_t vt;
-        if (!pop_stack_value_or_string(m_context, get_stack(), vt, val1, str1))
+        auto sv1 = pop_stack_value(m_context, get_stack());
+        if (!sv1)
+        {
+            IXION_DEBUG("failed to pop value from the stack");
             throw formula_error(formula_error_t::general_error);
-        is_val1 = vt == stack_value_t::value;
+        }
 
         if (mp_handler)
             mp_handler->push_token(oc);
@@ -548,33 +1125,88 @@ void formula_interpreter::expression()
         next();
         term();
 
-        if (!pop_stack_value_or_string(m_context, get_stack(), vt, val2, str2))
+        auto sv2 = pop_stack_value(m_context, get_stack());
+        if (!sv2)
+        {
+            IXION_DEBUG("failed to pop value from the stack");
             throw formula_error(formula_error_t::general_error);
-        is_val2 = vt == stack_value_t::value;
-
-        if (is_val1)
-        {
-            if (is_val2)
-            {
-                // Both are numeric values.
-                compare_values(get_stack(), oc, val1, val2);
-            }
-            else
-            {
-                compare_value_to_string(get_stack(), oc, val1, str2);
-            }
         }
-        else
+
+        switch (sv1->get_type())
         {
-            if (is_val2)
+            case stack_value_t::value:
             {
-                // Value 1 is string while value 2 is numeric.
-                compare_string_to_value(get_stack(), oc, str1, val2);
+                switch (sv2->get_type())
+                {
+                    case stack_value_t::value:
+                    {
+                        // Both are numeric values.
+                        compare_values(get_stack(), oc, sv1->get_value(), sv2->get_value());
+                        break;
+                    }
+                    case stack_value_t::string:
+                    {
+                        compare_value_to_string(get_stack(), oc, sv1->get_value(), sv2->get_string());
+                        break;
+                    }
+                    case stack_value_t::matrix:
+                    {
+                        compare_value_to_matrix(get_stack(), oc, sv1->get_value(), sv2->get_matrix());
+                        break;
+                    }
+                    default:
+                    {
+                        IXION_DEBUG("unsupported value type for value 2: " << sv2->get_type());
+                        throw formula_error(formula_error_t::general_error);
+                    }
+                }
+                break;
             }
-            else
+            case stack_value_t::string:
             {
-                // Both are strings.
-                compare_strings(get_stack(), oc, str1, str2);
+                switch (sv2->get_type())
+                {
+                    case stack_value_t::value:
+                    {
+                        // Value 1 is string while value 2 is numeric.
+                        compare_string_to_value(get_stack(), oc, sv1->get_string(), sv2->get_value());
+                        break;
+                    }
+                    case stack_value_t::string:
+                    {
+                        // Both are strings.
+                        compare_strings(get_stack(), oc, sv1->get_string(), sv2->get_string());
+                        break;
+                    }
+                    default:
+                    {
+                        IXION_DEBUG("unsupported value type for value 2: " << sv2->get_type());
+                        throw formula_error(formula_error_t::general_error);
+                    }
+                }
+                break;
+            }
+            case stack_value_t::matrix:
+            {
+                switch (sv2->get_type())
+                {
+                    case stack_value_t::value:
+                    {
+                        compare_matrix_to_value(get_stack(), oc, sv1->get_matrix(), sv2->get_value());
+                        break;
+                    }
+                    default:
+                    {
+                        IXION_DEBUG("unsupported value type for value 2: " << sv2->get_type());
+                        throw formula_error(formula_error_t::general_error);
+                    }
+                }
+                break;
+            }
+            default:
+            {
+                IXION_DEBUG("unsupported value type for value 1: " << sv1->get_type());
+                throw formula_error(formula_error_t::general_error);
             }
         }
     }
@@ -582,13 +1214,41 @@ void formula_interpreter::expression()
 
 void formula_interpreter::term()
 {
-    // <factor> || <factor> * <term>
+    // <factor> || <factor> (*|^|&|/) <term>
 
     factor();
     if (!has_token())
         return;
 
-    fopcode_t oc = token().get_opcode();
+    fopcode_t oc = token().opcode;
+
+    auto pop_matrix_or_numeric_values = [this]()
+    {
+        auto v1 = get_stack().pop_matrix_or_numeric();
+        next(); // skip the op token
+        term();
+        auto v2 = get_stack().pop_matrix_or_numeric();
+        return std::make_pair(std::move(v1), std::move(v2));
+    };
+
+    auto push_to_stack = [this](const resolved_stack_value& v)
+    {
+        switch (v.type())
+        {
+            case resolved_stack_value::value_type::matrix:
+                get_stack().push_matrix(v.get_matrix());
+                break;
+            case resolved_stack_value::value_type::numeric:
+                get_stack().push_value(v.get_numeric());
+                break;
+            case resolved_stack_value::value_type::string:
+                get_stack().push_string(v.get_string());
+                break;
+            default:
+                throw invalid_expression("result must be either matrix or double");
+        }
+    };
+
     switch (oc)
     {
         case fop_multiply:
@@ -596,10 +1256,9 @@ void formula_interpreter::term()
             if (mp_handler)
                 mp_handler->push_token(oc);
 
-            next();
-            double val = get_stack().pop_value();
-            term();
-            get_stack().push_value(val*get_stack().pop_value());
+            const auto& [lhs, rhs] = pop_matrix_or_numeric_values();
+            auto res = op_matrix_or_numeric<multiply_op>(lhs, rhs);
+            push_to_stack(res);
             return;
         }
         case fop_exponent:
@@ -607,11 +1266,9 @@ void formula_interpreter::term()
             if (mp_handler)
                 mp_handler->push_token(oc);
 
-            next();
-            double base = get_stack().pop_value();
-            term();
-            double exp = get_stack().pop_value();
-            get_stack().push_value(std::pow(base, exp));
+            const auto& [base, exp] = pop_matrix_or_numeric_values();
+            auto res = op_matrix_or_numeric<exponent_op>(base, exp);
+            push_to_stack(res);
             return;
         }
         case fop_concat:
@@ -619,12 +1276,12 @@ void formula_interpreter::term()
             if (mp_handler)
                 mp_handler->push_token(oc);
 
+            auto lhs = get_stack().pop_matrix_or_string();
             next();
-            std::string s1 = get_stack().pop_string();
             term();
-            std::string s2 = get_stack().pop_string();
-            std::string s = s1 + s2;
-            get_stack().push_string(std::move(s));
+            auto rhs = get_stack().pop_matrix_or_string();
+            auto res = concat_matrix_or_string(lhs, rhs);
+            push_to_stack(res);
             return;
         }
         case fop_divide:
@@ -632,13 +1289,9 @@ void formula_interpreter::term()
             if (mp_handler)
                 mp_handler->push_token(oc);
 
-            next();
-            double val = get_stack().pop_value();
-            term();
-            double val2 = get_stack().pop_value();
-            if (val2 == 0.0)
-                throw formula_error(formula_error_t::division_by_zero);
-            get_stack().push_value(val/val2);
+            const auto& [lhs, rhs] = pop_matrix_or_numeric_values();
+            auto res = op_matrix_or_numeric<divide_op>(lhs, rhs);
+            push_to_stack(res);
             return;
         }
         default:
@@ -651,7 +1304,7 @@ void formula_interpreter::factor()
     // <constant> || <variable> || '(' <expression> ')' || <function>
 
     bool negative_sign = sign(); // NB: may be precedeed by a '+' or '-' sign.
-    fopcode_t oc = token().get_opcode();
+    fopcode_t oc = token().opcode;
 
     switch (oc)
     {
@@ -684,10 +1337,15 @@ void formula_interpreter::factor()
         case fop_string:
             literal();
             break;
+        case fop_array_open:
+            array();
+            break;
         default:
-            ostringstream os;
+        {
+            std::ostringstream os;
             os << "factor: unexpected token type: <" << get_opcode_name(oc) << ">";
             throw invalid_expression(os.str());
+        }
     }
 
     if (negative_sign)
@@ -701,7 +1359,7 @@ bool formula_interpreter::sign()
 {
     ensure_token_exists();
 
-    fopcode_t oc = token().get_opcode();
+    fopcode_t oc = token().opcode;
     bool sign_set = false;
 
     switch (oc)
@@ -733,7 +1391,7 @@ void formula_interpreter::paren()
 
     next();
     expression();
-    if (token_or_throw().get_opcode() != fop_close)
+    if (token_or_throw().opcode != fop_close)
         throw invalid_expression("paren: expected close paren");
 
     if (mp_handler)
@@ -744,7 +1402,7 @@ void formula_interpreter::paren()
 
 void formula_interpreter::single_ref()
 {
-    address_t addr = token().get_single_ref();
+    const address_t& addr = std::get<address_t>(token().value);
     IXION_TRACE("ref=" << addr.get_name() << "; origin=" << m_pos.get_name());
 
     if (mp_handler)
@@ -765,7 +1423,7 @@ void formula_interpreter::single_ref()
 
 void formula_interpreter::range_ref()
 {
-    range_t range = token().get_range_ref();
+    const range_t& range = std::get<range_t>(token().value);
     IXION_TRACE("ref-start=" << range.first.get_name() << "; ref-end=" << range.last.get_name() << "; origin=" << m_pos.get_name());
 
     if (mp_handler)
@@ -796,7 +1454,7 @@ void formula_interpreter::table_ref()
         throw formula_error(formula_error_t::ref_result_not_available);
     }
 
-    table_t table = token().get_table_ref();
+    const table_t& table = std::get<table_t>(token().value);
 
     if (mp_handler)
         mp_handler->push_table_ref(table);
@@ -819,7 +1477,7 @@ void formula_interpreter::table_ref()
 
 void formula_interpreter::constant()
 {
-    double val = token().get_value();
+    double val = std::get<double>(token().value);
     next();
     get_stack().push_value(val);
     if (mp_handler)
@@ -828,22 +1486,192 @@ void formula_interpreter::constant()
 
 void formula_interpreter::literal()
 {
-    string_id_t sid = token().get_uint32();
-    const std::string* p = m_context.get_string(sid);
-    if (!p)
-        throw general_error("no string found for the specified string ID.");
+    const std::string& s = string_or_throw();
 
     next();
-    get_stack().push_string(*p);
+    get_stack().push_string(s);
+}
+
+void formula_interpreter::array()
+{
+    // '{' <constant> or <literal> ',' or ';' <constant> or <literal> ',' or ';' .... '}'
+    assert(token().opcode == fop_array_open);
+
     if (mp_handler)
-        mp_handler->push_string(sid);
+        mp_handler->push_token(fop_array_open);
+
+    next(); // skip '{'
+
+    std::vector<double> values;
+    std::vector<std::tuple<std::size_t, std::size_t, std::string>> strings;
+    std::size_t row = 0;
+    std::size_t col = 0;
+    std::optional<std::size_t> prev_col;
+
+    fopcode_t prev_op = fop_array_open;
+
+    for (; has_token(); next())
+    {
+        bool has_sign = false;
+
+        switch (prev_op)
+        {
+            case fop_array_open:
+            case fop_sep:
+            case fop_array_row_sep:
+                has_sign = sign();
+                break;
+            default:;
+        }
+
+        switch (token().opcode)
+        {
+            case fop_string:
+            {
+                switch (prev_op)
+                {
+                    case fop_array_open:
+                    case fop_sep:
+                    case fop_array_row_sep:
+                        break;
+                    default:
+                        throw invalid_expression("array: invalid placement of value");
+                }
+
+                strings.emplace_back(row, col, string_or_throw());
+                values.push_back(0); // placeholder value, will be replaced
+
+                ++col;
+                break;
+            }
+            case fop_value:
+            {
+                switch (prev_op)
+                {
+                    case fop_minus:
+                    case fop_plus:
+                    case fop_array_open:
+                    case fop_sep:
+                    case fop_array_row_sep:
+                        break;
+                    default:
+                        throw invalid_expression("array: invalid placement of value");
+                }
+
+                double v = std::get<double>(token().value);
+
+                if (mp_handler)
+                    mp_handler->push_value(v);
+
+                if (has_sign)
+                    v = -v;
+
+                values.push_back(v);
+
+                ++col;
+                break;
+            }
+            case fop_sep:
+            {
+                switch (prev_op)
+                {
+                    case fop_value:
+                    case fop_string:
+                        break;
+                    default:
+                        throw invalid_expression("array: unexpected separator");
+                }
+
+                if (mp_handler)
+                    mp_handler->push_token(fop_sep);
+                break;
+            }
+            case fop_array_row_sep:
+            {
+                switch (prev_op)
+                {
+                    case fop_value:
+                    case fop_string:
+                        break;
+                    default:
+                        throw invalid_expression("array: unexpected row separator");
+                }
+
+                if (mp_handler)
+                    mp_handler->push_token(fop_array_row_sep);
+
+                ++row;
+
+                if (prev_col && *prev_col != col)
+                    throw invalid_expression("array: inconsistent column width");
+
+                prev_col = col;
+                col = 0;
+                break;
+            }
+            case fop_array_close:
+            {
+                switch (prev_op)
+                {
+                    case fop_array_open:
+                    case fop_value:
+                    case fop_string:
+                        break;
+                    default:
+                        throw invalid_expression("array: invalid placement of array close operator");
+                }
+
+                if (prev_col && *prev_col != col)
+                    throw invalid_expression("array: inconsistent column width");
+
+                ++row;
+
+                // Stored values are in row-major order, but the matrix expects a column-major array.
+                numeric_matrix num_mtx_transposed(std::move(values), col, row);
+                numeric_matrix num_mtx(row, col);
+
+                for (std::size_t r = 0; r < row; ++r)
+                    for (std::size_t c = 0; c < col; ++c)
+                        num_mtx(r, c) = num_mtx_transposed(c, r);
+
+                if (strings.empty())
+                    // pure numeric matrix
+                    get_stack().push_matrix(std::move(num_mtx));
+                else
+                {
+                    // multi-type matrix
+                    matrix mtx(num_mtx);
+                    for (const auto& [r, c, str] : strings)
+                        mtx.set(r, c, str);
+
+                    get_stack().push_matrix(std::move(mtx));
+                }
+
+                if (mp_handler)
+                    mp_handler->push_token(fop_array_close);
+
+                next(); // skip '}'
+                return;
+            }
+            default:
+            {
+                std::ostringstream os;
+                os << "array: unexpected token type: <" << get_opcode_name(token().opcode) << ">";
+                throw invalid_expression(os.str());
+            }
+        }
+
+        prev_op = token().opcode;
+    }
+
+    throw invalid_expression("array: ended prematurely");
 }
 
 void formula_interpreter::function()
 {
     // <func name> '(' <expression> ',' <expression> ',' ... ',' <expression> ')'
     ensure_token_exists();
-    assert(token().get_opcode() == fop_function);
+    assert(token().opcode == fop_function);
     formula_function_t func_oc = formula_functions::get_function_opcode(token());
     if (mp_handler)
         mp_handler->push_function(func_oc);
@@ -853,13 +1681,13 @@ void formula_interpreter::function()
     IXION_TRACE("function='" << get_formula_function_name(func_oc) << "'");
     assert(get_stack().empty());
 
-    if (next_token().get_opcode() != fop_open)
+    if (next_token().opcode != fop_open)
         throw invalid_expression("expecting a '(' after a function name.");
 
     if (mp_handler)
         mp_handler->push_token(fop_open);
 
-    fopcode_t oc = next_token().get_opcode();
+    fopcode_t oc = next_token().opcode;
     bool expect_sep = false;
     while (oc != fop_close)
     {
@@ -878,7 +1706,7 @@ void formula_interpreter::function()
             expression();
             expect_sep = true;
         }
-        oc = token_or_throw().get_opcode();
+        oc = token_or_throw().opcode;
     }
 
     if (mp_handler)
@@ -888,7 +1716,7 @@ void formula_interpreter::function()
 
     // Function call pops all stack values pushed onto the stack this far, and
     // pushes the result onto the stack.
-    formula_functions(m_context).interpret(func_oc, get_stack());
+    formula_functions(m_context, m_pos).interpret(func_oc, get_stack());
     assert(get_stack().size() == 1);
 
     pop_stack();

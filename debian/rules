@@ -5,6 +5,8 @@
 
 include /usr/share/dpkg/architecture.mk
 
+export DEB_CXXFLAGS_MAINT_APPEND += -fexcess-precision=fast
+
 %:
 	dh $@
 
@@ -24,11 +26,12 @@ override_dh_auto_test-arch:
 	PYTHONPATH="$(CURDIR)/src/python/.libs" dh_auto_test
 
 override_dh_missing:
-	rm -f debian/tmp/usr/lib/x86_64-linux-gnu/libixion-0.17.la
+	rm -f debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libixion-0.18.la
 	dh_missing
 
 override_dh_makeshlibs:
-	dh_makeshlibs -VNone
+	# ImportError: /lib/x86_64-linux-gnu/liborcus-spreadsheet-model-0.18.so.0: undefined symbol: _ZN5ixion12print_configD1Ev
+	dh_makeshlibs -VUpstream-Version
 
 override_dh_installdocs:
 	# Ignore Policy v3.9.7 §12.3 for now

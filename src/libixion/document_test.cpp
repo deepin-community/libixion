@@ -5,10 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/document.hpp"
-#include "ixion/address.hpp"
-#include "ixion/macros.hpp"
-#include "ixion/cell_access.hpp"
+#include "test_global.hpp" // This must be the first header to be included.
+
+#include <ixion/document.hpp>
+#include <ixion/address.hpp>
+#include <ixion/macros.hpp>
+#include <ixion/cell_access.hpp>
 
 #include <iostream>
 #include <cassert>
@@ -33,6 +35,8 @@ bool equal(double v1, double v2)
 
 void test_basic_calc()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     abs_address_t A1(0, 0, 0);
     abs_address_t A2(0, 1, 0);
     abs_address_t A3(0, 2, 0);
@@ -61,6 +65,8 @@ void test_basic_calc()
 
 void test_string_io()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     document doc;
     doc.append_sheet("test");
 
@@ -93,6 +99,8 @@ void test_string_io()
 
 void test_boolean_io()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     document doc;
     doc.append_sheet("test1");
     doc.append_sheet("test2");
@@ -122,6 +130,8 @@ void test_boolean_io()
 
 void test_custom_cell_address_syntax()
 {
+    IXION_TEST_FUNC_SCOPE;
+
     document doc(formula_name_resolver_t::excel_r1c1);
     doc.append_sheet("MySheet");
 
@@ -131,12 +141,48 @@ void test_custom_cell_address_syntax()
     assert(v == 345.0);
 }
 
+void test_rename_sheets()
+{
+    IXION_TEST_FUNC_SCOPE;
+
+    document doc(formula_name_resolver_t::excel_r1c1);
+    doc.append_sheet("Sheet1");
+    doc.append_sheet("Sheet2");
+    doc.append_sheet("Sheet3");
+    doc.set_numeric_cell("Sheet3!R3C3", 456.0);
+
+    double v = doc.get_numeric_value("Sheet3!R3C3");
+    assert(v == 456.0);
+
+    doc.set_sheet_name(0, "S1");
+    doc.set_sheet_name(1, "S2");
+    doc.set_sheet_name(2, "S3");
+
+    v = doc.get_numeric_value("S3!R3C3");
+    assert(v == 456.0);
+
+    doc.set_numeric_cell("S2!R4C2", 789.0);
+    v = doc.get_numeric_value("S2!R4C2");
+    assert(v == 789.0);
+
+    try
+    {
+        doc.get_numeric_value("Sheet3!R3C3");
+        assert(!"Exception should've been thrown.");
+    }
+    catch (const std::invalid_argument&)
+    {
+        // correct exception
+    }
+}
+
 int main()
 {
     test_basic_calc();
     test_string_io();
     test_boolean_io();
     test_custom_cell_address_syntax();
+    test_rename_sheets();
 
     return EXIT_SUCCESS;
 }

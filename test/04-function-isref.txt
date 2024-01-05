@@ -1,0 +1,18 @@
+%% Test for ISREF function.
+%mode init
+C5=ISREF(A2)
+C6=ISREF(A1:A10)
+C7=ISREF("inline text")
+C8=ISREF(42)
+C9=ISREF(CONCATENATE("this ", "is ", "text"))
+C10=ISREF(A1 + 10)
+%calc
+%mode result
+C5=true
+C6=true
+C7=false
+C8=false
+C9=false
+C10=false
+%check
+%exit

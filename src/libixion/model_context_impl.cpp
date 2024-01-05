@@ -7,12 +7,13 @@
 
 #include "model_context_impl.hpp"
 
-#include "ixion/address.hpp"
-#include "ixion/cell.hpp"
-#include "ixion/formula_result.hpp"
-#include "ixion/matrix.hpp"
-#include "ixion/interface/session_handler.hpp"
-#include "ixion/model_iterator.hpp"
+#include <ixion/address.hpp>
+#include <ixion/cell.hpp>
+#include <ixion/formula_result.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/interface/session_handler.hpp>
+#include <ixion/model_iterator.hpp>
+#include <ixion/exceptions.hpp>
 
 #include "calc_status.hpp"
 #include "model_types.hpp"
@@ -33,8 +34,8 @@ string_id_t safe_string_pool::append_string_unsafe(std::string_view s)
     assert(!s.empty());
 
     string_id_t str_id = m_strings.size();
-    m_strings.push_back(std::make_unique<std::string>(s));
-    s = *m_strings.back();
+    m_strings.push_back(std::string{s});
+    s = m_strings.back();
     m_string_map.insert(string_map_type::value_type(s, str_id));
     return str_id;
 }
@@ -71,7 +72,7 @@ const std::string* safe_string_pool::get_string(string_id_t identifier) const
     if (identifier >= m_strings.size())
         return nullptr;
 
-    return m_strings[identifier].get();
+    return &m_strings[identifier];
 }
 
 size_t safe_string_pool::size() const
@@ -86,7 +87,7 @@ void safe_string_pool::dump_strings() const
         auto it = m_strings.begin(), ite = m_strings.end();
         for (string_id_t sid = 0; it != ite; ++it, ++sid)
         {
-            const std::string& s = **it;
+            const std::string& s = *it;
             cout << "* " << sid << ": '" << s << "' (" << (void*)s.data() << ")" << endl;
         }
     }
@@ -179,6 +180,22 @@ void check_named_exp_name_or_throw(const char* p, size_t n)
         os << "name contains invalid character '" << c << "'";
         throw model_context_error(os.str(), model_context_error::invalid_named_expression);
     }
+}
+
+void clip_range(abs_range_t& range, const rc_size_t& sheet_size)
+{
+    if (range.first.row == row_unset)
+        range.first.row = 0;
+    if (range.last.row == row_unset)
+        range.last.row = sheet_size.row - 1;
+}
+
+void throw_sheet_name_conflict(const std::string& name)
+{
+    // This sheet name is already taken.
+    std::ostringstream os;
+    os << "Sheet name '" << name << "' already exists.";
+    throw model_context_error(os.str(), model_context_error::sheet_name_conflict);
 }
 
 } // anonymous namespace
@@ -276,10 +293,34 @@ sheet_t model_context_impl::get_sheet_index(std::string_view name) const
 
 std::string model_context_impl::get_sheet_name(sheet_t sheet) const
 {
-    if (m_sheet_names.size() <= static_cast<size_t>(sheet))
+    if (sheet < 0 || m_sheet_names.size() <= std::size_t(sheet))
         return std::string();
 
     return m_sheet_names[sheet];
+}
+
+void model_context_impl::set_sheet_name(sheet_t sheet, std::string name)
+{
+    if (sheet < 0 || m_sheet_names.size() <= std::size_t(sheet))
+    {
+        std::ostringstream os;
+        os << "invalid sheet index: " << sheet;
+        throw std::invalid_argument(os.str());
+    }
+
+    for (std::size_t i = 0; i < m_sheet_names.size(); ++i)
+    {
+        if (m_sheet_names[i] == name)
+        {
+            if (i == std::size_t(sheet))
+                // Same sheet name is given. No point updating it.
+                return;
+            else
+                throw_sheet_name_conflict(name);
+        }
+    }
+
+    m_sheet_names[sheet] = std::move(name);
 }
 
 rc_size_t model_context_impl::get_sheet_size() const
@@ -300,12 +341,7 @@ sheet_t model_context_impl::append_sheet(std::string&& name)
     strings_type::const_iterator it =
         std::find(m_sheet_names.begin(), m_sheet_names.end(), name);
     if (it != m_sheet_names.end())
-    {
-        // This sheet name is already taken.
-        std::ostringstream os;
-        os << "Sheet name '" << name << "' already exists.";
-        throw model_context_error(os.str(), model_context_error::sheet_name_conflict);
-    }
+        throw_sheet_name_conflict(name);
 
     // index of the new sheet.
     sheet_t sheet_index = m_sheets.size();
@@ -420,6 +456,10 @@ double count_formula_block(
 
         switch (res.get_type())
         {
+            case formula_result::result_type::boolean:
+                if (vt.is_boolean())
+                    ++ret;
+                break;
             case formula_result::result_type::value:
                 if (vt.is_numeric())
                     ++ret;
@@ -440,12 +480,28 @@ double count_formula_block(
     return ret;
 }
 
+column_block_t map_column_block_type(const mdds::mtv::element_t mtv_type)
+{
+    static const std::map<mdds::mtv::element_t, column_block_t> rules = {
+        { element_type_empty, column_block_t::empty }, // -1
+        { element_type_boolean, column_block_t::boolean }, // 0
+        { element_type_string, column_block_t::string }, // 6
+        { element_type_numeric, column_block_t::numeric }, // 10
+        { element_type_formula, column_block_t::formula }, // user-start (50)
+    };
+
+    auto it = rules.find(mtv_type);
+    return it == rules.end() ? column_block_t::unknown : it->second;
 }
 
-double model_context_impl::count_range(const abs_range_t& range, const values_t& values_type) const
+} // anonymous namespace
+
+double model_context_impl::count_range(abs_range_t range, values_t values_type) const
 {
     if (m_sheets.empty())
         return 0.0;
+
+    clip_range(range, m_sheet_size);
 
     double ret = 0.0;
     sheet_t last_sheet = range.last.sheet;
@@ -521,6 +577,40 @@ double model_context_impl::count_range(const abs_range_t& range, const values_t&
     }
 
     return ret;
+}
+
+void model_context_impl::walk(sheet_t sheet, const abs_rc_range_t& range, column_block_callback_t cb) const
+{
+    const worksheet& sh = m_sheets.at(sheet);
+
+    for (col_t ic = range.first.column; ic <= range.last.column; ++ic)
+    {
+        row_t cur_row = range.first.row;
+
+        while (cur_row <= range.last.row)
+        {
+            const column_store_t& col = sh.at(ic);
+            auto pos = col.position(cur_row);
+            auto blk = pos.first;
+
+            column_block_shape_t shape;
+            shape.position = blk->position;
+            shape.size = blk->size;
+            shape.offset = pos.second;
+            shape.type = map_column_block_type(blk->type);
+            shape.data = blk->data;
+
+            // last row specified by the caller, or row corresponding to the
+            // last element of the block, whichever comes first.
+            row_t last_row = std::min<row_t>(blk->size - pos.second - 1 + cur_row, range.last.row);
+
+            if (!cb(ic, cur_row, last_row, shape))
+                return;
+
+            assert(blk->size > pos.second);
+            cur_row += blk->size - pos.second;
+        }
+    }
 }
 
 bool model_context_impl::empty() const
@@ -830,12 +920,43 @@ bool model_context_impl::is_empty(const abs_address_t& addr) const
     return m_sheets.at(addr.sheet).at(addr.column).is_empty(addr.row);
 }
 
+bool model_context_impl::is_empty(abs_range_t range) const
+{
+    range = shrink_to_workbook(range);
+
+    for (sheet_t sh = range.first.sheet; sh <= range.last.sheet; ++sh)
+    {
+        for (col_t col = range.first.column; col <= range.last.column; ++col)
+        {
+            const column_store_t& col_store = m_sheets[sh][col];
+            auto pos = col_store.position(range.first.row);
+            if (pos.first->type != element_type_empty)
+                // The top block is non-empty.
+                return false;
+
+            // See if this block covers the entire row range.
+            row_t last_empty_row = range.first.row + pos.first->size - pos.second - 1;
+            if (last_empty_row < range.last.row)
+                return false;
+        }
+    }
+
+    return true;
+}
+
 celltype_t model_context_impl::get_celltype(const abs_address_t& addr) const
 {
     mdds::mtv::element_t gmcell_type =
         m_sheets.at(addr.sheet).at(addr.column).get_type(addr.row);
 
     return detail::to_celltype(gmcell_type);
+}
+
+cell_value_t model_context_impl::get_cell_value_type(const abs_address_t& addr) const
+{
+    const column_store_t& col_store = m_sheets.at(addr.sheet).at(addr.column);
+    auto pos = col_store.position(addr.row);
+    return detail::to_cell_value_type(pos, get_formula_result_wait_policy());
 }
 
 double model_context_impl::get_numeric_value(const abs_address_t& addr) const
@@ -966,6 +1087,38 @@ formula_result model_context_impl::get_formula_result(const abs_address_t& addr)
         throw general_error("not a formula cell.");
 
     return fc->get_result_cache(m_formula_res_wait_policy);
+}
+
+abs_range_t model_context_impl::shrink_to_workbook(abs_range_t range) const
+{
+    range.reorder();
+
+    if (m_sheets.empty())
+        return range;
+
+    if (range.first.sheet >= sheet_t(m_sheets.size()))
+        throw general_error("out-of-bound sheet ranges");
+
+    range.last.sheet = std::min<sheet_t>(range.last.sheet, m_sheets.size()-1);
+    const worksheet& ws = m_sheets[range.last.sheet];
+    const column_stores_t& cols = ws.get_columns();
+
+    if (cols.empty())
+        return range;
+
+    if (range.first.column >= col_t(cols.size()))
+        throw general_error("out-of-bound column ranges");
+
+    range.last.column = std::min<col_t>(range.last.column, cols.size()-1);
+
+    const column_store_t& col = cols[0];
+
+    if (range.first.row >= row_t(col.size()))
+        throw general_error("out-of-bound row ranges");
+
+    range.last.row = std::min<row_t>(range.last.row, col.size()-1);
+
+    return range;
 }
 
 }}

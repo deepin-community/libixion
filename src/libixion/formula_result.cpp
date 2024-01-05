@@ -5,13 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#include "ixion/formula_result.hpp"
-#include "ixion/exceptions.hpp"
-#include "ixion/interface/formula_model_access.hpp"
-#include "ixion/config.hpp"
-#include "ixion/matrix.hpp"
-
-#include "mem_str_buf.hpp"
+#include <ixion/formula_result.hpp>
+#include <ixion/exceptions.hpp>
+#include <ixion/config.hpp>
+#include <ixion/matrix.hpp>
+#include <ixion/model_context.hpp>
 
 #include <cassert>
 #include <sstream>
@@ -19,22 +17,19 @@
 #include <ostream>
 #include <variant>
 
-#define DEBUG_FORMULA_RESULT 0
-
-#if DEBUG_FORMULA_RESULT
-#include <iostream>
-#endif
+#include "debug.hpp"
 
 namespace ixion {
 
 struct formula_result::impl
 {
-    using result_value_type = std::variant<double, formula_error_t, matrix, std::string>;
+    using result_value_type = std::variant<bool, double, formula_error_t, matrix, std::string>;
 
     result_type type;
     result_value_type value;
 
     impl() : type(result_type::value), value(0.0) {}
+    impl(bool b) : type(result_type::boolean), value(b) {}
     impl(double v) : type(result_type::value), value(v) {}
     impl(std::string str) : type(result_type::string), value(std::move(str)) {}
     impl(formula_error_t e) : type(result_type::error), value(e) {}
@@ -47,8 +42,15 @@ struct formula_result::impl
         value = 0.0;
     }
 
+    void set_boolean(bool b)
+    {
+        type = result_type::boolean;
+        value = b;
+    }
+
     void set_value(double v)
     {
+        IXION_TRACE("v=" << v);
         type = result_type::value;
         value = v;
     }
@@ -69,6 +71,12 @@ struct formula_result::impl
     {
         type = result_type::matrix;
         value = std::move(mtx);
+    }
+
+    bool get_boolean() const
+    {
+        assert(type == result_type::boolean);
+        return std::get<bool>(value);
     }
 
     double get_value() const
@@ -106,7 +114,7 @@ struct formula_result::impl
         return type;
     }
 
-    std::string str(const iface::formula_model_access& cxt) const
+    std::string str(const model_context& cxt) const
     {
         switch (type)
         {
@@ -117,6 +125,12 @@ struct formula_result::impl
             }
             case result_type::string:
                 return std::get<std::string>(value);
+            case result_type::boolean:
+            {
+                std::ostringstream os;
+                os << std::boolalpha << std::get<bool>(value);
+                return os.str();
+            }
             case result_type::value:
             {
                 std::ostringstream os;
@@ -204,8 +218,8 @@ struct formula_result::impl
             case 'f':
             {
                 // parse this as a boolean value.
-                value = to_bool(s) ? 1.0 : 0.0;
-                type = result_type::value;
+                value = to_bool(s);
+                type = result_type::boolean;
                 break;
             }
             default:
@@ -236,102 +250,32 @@ struct formula_result::impl
         assert(!s.empty());
         assert(s[0] == '#');
 
-        const char* p = s.data();
-        const char* p_end = p + s.size();
+        formula_error_t err = to_formula_error_type(s);
 
-        ++p; // skip '#'.
-        mem_str_buf buf;
-        for (; p != p_end; ++p)
+        if (err == formula_error_t::no_error)
         {
-            bool good = true;
-
-            switch (*p)
-            {
-                case '!':
-                {
-                    if (buf.empty())
-                    {
-                        good = false;
-                        break;
-                    }
-
-                    if (buf.equals("REF"))
-                    {
-                        value = formula_error_t::ref_result_not_available;
-                    }
-                    else if (buf.equals("DIV/0"))
-                    {
-                        value = formula_error_t::division_by_zero;
-                    }
-                    else
-                    {
-                        good = false;
-                        break;
-                    }
-
-                    type = result_type::error;
-                    return;
-                }
-                case '?':
-                {
-                    if (buf.empty())
-                    {
-                        good = false;
-                        break;
-                    }
-
-                    if (buf.equals("NAME"))
-                    {
-                        value = formula_error_t::name_not_found;
-                    }
-                    else
-                    {
-                        good = false;
-                        break;
-                    }
-
-                    type = result_type::error;
-                    return;
-                }
-            }
-
-            if (!good)
-                // parse failure.
-                break;
-
-            if (buf.empty())
-                buf.set_start(p);
-            else
-                buf.inc();
+            std::ostringstream os;
+            os << "malformed error string: " << s;
+            throw general_error(os.str());
         }
 
-        std::ostringstream os;
-        os << "malformed error string: " << s;
-        throw general_error(os.str());
+        value = err;
+        type = result_type::error;
     }
 
     void parse_string(std::string_view s)
     {
-        if (s.size() <= 1u)
+        if (s.size() < 2u)
+            // It needs to at least have the opening and closing quotes.
             return;
 
         assert(s[0] == '"');
-        const char* p = s.data();
-        ++p;
-        const char* p_first = p;
-        std::size_t len = 0;
-        for (std::size_t i = 1; i < s.size(); ++i, ++len, ++p)
-        {
-            char c = *p;
-            if (c == '"')
-                break;
-        }
-
-        if (!len)
+        auto pos = s.find_first_of('"', 1);
+        if (pos == std::string_view::npos)
             throw general_error("failed to parse string result.");
 
         type = result_type::string;
-        value = std::string(p_first, len);
+        value = std::string(&s[1], pos - 1);
     }
 };
 
@@ -342,6 +286,8 @@ formula_result::formula_result(const formula_result& r) :
     mp_impl(std::make_unique<impl>(*r.mp_impl)) {}
 
 formula_result::formula_result(formula_result&& r) : mp_impl(std::move(r.mp_impl)) {}
+
+formula_result::formula_result(bool b) : mp_impl(std::make_unique<impl>(b)) {}
 
 formula_result::formula_result(double v) : mp_impl(std::make_unique<impl>(v)) {}
 
@@ -356,6 +302,11 @@ formula_result::~formula_result() {}
 void formula_result::reset()
 {
     mp_impl->reset();
+}
+
+void formula_result::set_boolean(bool b)
+{
+    mp_impl->set_boolean(b);
 }
 
 void formula_result::set_value(double v)
@@ -376,6 +327,11 @@ void formula_result::set_error(formula_error_t e)
 void formula_result::set_matrix(matrix mtx)
 {
     mp_impl->set_matrix(std::move(mtx));
+}
+
+bool formula_result::get_boolean() const
+{
+    return mp_impl->get_boolean();
 }
 
 double formula_result::get_value() const
@@ -408,7 +364,7 @@ formula_result::result_type formula_result::get_type() const
     return mp_impl->get_type();
 }
 
-std::string formula_result::str(const iface::formula_model_access& cxt) const
+std::string formula_result::str(const model_context& cxt) const
 {
     return mp_impl->str(cxt);
 }
@@ -436,7 +392,6 @@ bool formula_result::operator!= (const formula_result& r) const
 
 std::ostream& operator<< (std::ostream& os, formula_result::result_type v)
 {
-
     switch (v)
     {
         case formula_result::result_type::error:
@@ -450,6 +405,9 @@ std::ostream& operator<< (std::ostream& os, formula_result::result_type v)
             break;
         case formula_result::result_type::value:
             os << "value";
+            break;
+        case formula_result::result_type::boolean:
+            os << "boolean";
             break;
         default:
             ;

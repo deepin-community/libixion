@@ -1,5 +1,7 @@
 .. highlight:: cpp
 
+.. _index:
+
 C++ API
 =======
 

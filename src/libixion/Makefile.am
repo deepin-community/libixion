@@ -14,10 +14,11 @@ endif # BUILD_VULKAN
 
 check_PROGRAMS = \
 	document-test \
-	ixion-test \
+	general-test \
 	ixion-test-track-deps \
 	compute-engine-test \
-	dirty-cell-tracker-test
+	dirty-cell-tracker-test \
+	name-resolver-test
 
 lib_LTLIBRARIES = libixion-@IXION_API_VERSION@.la
 libixion_@IXION_API_VERSION@_la_SOURCES = \
@@ -29,8 +30,6 @@ libixion_@IXION_API_VERSION@_la_SOURCES = \
 	cell_access.cpp \
 	column_store_type.hpp \
 	compute_engine.cpp \
-	concrete_formula_tokens.hpp \
-	concrete_formula_tokens.cpp \
 	config.cpp \
 	debug.hpp \
 	debug.cpp \
@@ -54,11 +53,12 @@ libixion_@IXION_API_VERSION@_la_SOURCES = \
 	formula_value_stack.hpp \
 	formula_value_stack.cpp \
 	global.cpp \
+	impl_types.hpp \
+	impl_types.cpp \
 	info.cpp \
 	lexer_tokens.hpp \
 	lexer_tokens.cpp \
 	matrix.cpp \
-	mem_str_buf.cpp \
 	model_context.cpp \
 	model_context_impl.hpp \
 	model_context_impl.cpp \
@@ -71,6 +71,8 @@ libixion_@IXION_API_VERSION@_la_SOURCES = \
 	queue_entry.cpp \
 	table.cpp \
 	types.cpp \
+	utf8.hpp \
+	utf8.cpp \
 	utils.hpp \
 	utils.cpp \
 	workbook.hpp \
@@ -118,35 +120,45 @@ libixion_@IXION_API_VERSION@_la_LDFLAGS = \
 libixion_@IXION_API_VERSION@_la_LIBADD = \
 	$(BOOST_FILESYSTEM_LIBS)
 
-EXTRA_DIST = makefile.mk
-
 document_test_SOURCES = document_test.cpp
 document_test_LDADD = \
-	libixion-@IXION_API_VERSION@.la
-
-ixion_test_SOURCES = ixion_test.cpp
-ixion_test_LDADD = \
 	libixion-@IXION_API_VERSION@.la \
+	../test/libixion-test.a
+
+general_test_SOURCES = general_test.cpp
+general_test_LDADD = \
+	libixion-@IXION_API_VERSION@.la \
+	../test/libixion-test.a \
+	$(BOOST_PROGRAM_OPTIONS_LIBS)
+
+name_resolver_test_SOURCES = name_resolver_test.cpp
+name_resolver_test_LDADD = \
+	libixion-@IXION_API_VERSION@.la \
+	../test/libixion-test.a \
 	$(BOOST_PROGRAM_OPTIONS_LIBS)
 
 ixion_test_track_deps_SOURCES = ixion_test_track_deps.cpp
 ixion_test_track_deps_LDADD = \
 	libixion-@IXION_API_VERSION@.la \
+	../test/libixion-test.a \
 	$(BOOST_PROGRAM_OPTIONS_LIBS)
 
 compute_engine_test_SOURCES = compute_engine_test.cpp
 compute_engine_test_LDADD = \
+	../test/libixion-test.a \
 	libixion-@IXION_API_VERSION@.la
 
 dirty_cell_tracker_test_SOURCES = dirty_cell_tracker_test.cpp
 dirty_cell_tracker_test_LDADD = \
+	../test/libixion-test.a \
 	libixion-@IXION_API_VERSION@.la
 
 AM_TESTS_ENVIRONMENT =
 
 TESTS = \
 	document-test \
-	ixion-test \
+	general-test \
 	ixion-test-track-deps \
 	compute-engine-test \
-	dirty-cell-tracker-test
+	dirty-cell-tracker-test \
+	name-resolver-test
