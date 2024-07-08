@@ -1,3 +1,9 @@
+libixion (0.19.0-4deepin1) unstable; urgency=medium
+
+  * No source change upload against python 3.12.
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Mon, 08 Jul 2024 09:51:19 +0200
+
 libixion (0.19.0-4) unstable; urgency=medium
 
   * upload to unstable 
